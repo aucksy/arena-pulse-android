@@ -182,6 +182,8 @@ class ScreenRenderTest {
         assertVisible("Qwen4 Max")
 
         composeRule.onNode(hasSetTextAction()).performTextReplacement("qwen")
+        // The clock is frozen for the live-sync pulse, so drive the recomposition frame manually.
+        composeRule.mainClock.advanceTimeByFrame()
         composeRule.waitForIdle()
 
         assertVisible("Qwen4 Max")
