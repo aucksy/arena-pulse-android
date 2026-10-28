@@ -263,7 +263,7 @@ fun FrontierChartScreen(
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "Value score " + String.format(Locale.US, "%.1f", selected.valueScore),
+                            text = "Value score " + LeaderboardUseCases.formatValueScore(selected),
                             style = MaterialTheme.typography.bodySmall,
                             color = ArenaTextSecondary
                         )

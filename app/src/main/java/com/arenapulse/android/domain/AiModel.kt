@@ -11,6 +11,14 @@ import kotlin.math.max
  *
  * [previousInputPricePerMillion] / [previousOutputPricePerMillion] are populated
  * from the prior cache entry so the UI can surface price moves between syncs.
+ *
+ * OpenRouter publishes service variants as `provider/model:suffix` (`:batch`,
+ * `:free`). Those are alternates of an existing model with different billing and
+ * throughput, so [variantLabel] marks them and the UI hides them by default.
+ *
+ * [cacheReadPricePerMillion] is the discounted rate for cached prompt tokens and
+ * [overrideThresholdTokens] describes tiered pricing above a prompt-size cut-off;
+ * both are optional and default to "not offered".
  */
 @Serializable
 data class AiModel(
@@ -32,7 +40,12 @@ data class AiModel(
     val speedTokensPerSec: Double = 0.0,
     val isOpenWeight: Boolean = false,
     val previousInputPricePerMillion: Double? = null,
-    val previousOutputPricePerMillion: Double? = null
+    val previousOutputPricePerMillion: Double? = null,
+    val cacheReadPricePerMillion: Double? = null,
+    val overrideThresholdTokens: Int? = null,
+    val overrideInputPricePerMillion: Double? = null,
+    val overrideOutputPricePerMillion: Double? = null,
+    val expiresAt: Long? = null
 ) {
     /** 3:1 input-to-output blend used for value and Pareto comparisons. */
     val blendedPricePerMillion: Double
@@ -51,6 +64,51 @@ data class AiModel(
 
     val supportsVision: Boolean
         get() = modality.contains("image", ignoreCase = true)
+
+    /** `batch` / `free` / `thinking`… for service variants, null for canonical models. */
+    val variantLabel: String?
+        get() = id.substringAfter(':', "").ifBlank { null }
+
+    val isVariant: Boolean
+        get() = variantLabel != null
+
+    /** True when cached prompt tokens are billed at a different rate. */
+    val hasCachePricing: Boolean
+        get() = (cacheReadPricePerMillion ?: 0.0) > 0.0
+
+    /** Percentage saved per cached input token versus the standard input rate. */
+    val cacheDiscountPercent: Double?
+        get() {
+            val cached = cacheReadPricePerMillion ?: return null
+            if (cached <= 0.0 || inputPricePerMillion <= 0.0) return null
+            val saved = (inputPricePerMillion - cached) / inputPricePerMillion * 100.0
+            return if (saved < 1.0) null else saved
+        }
+
+    val hasTieredPricing: Boolean
+        get() = overrideThresholdTokens != null && overrideInputPricePerMillion != null
+
+    /**
+     * Models OpenRouter has scheduled for removal, or null when there is no
+     * published end-of-life date. [nowSeconds] keeps this testable.
+     */
+    fun retiresInDays(nowSeconds: Long): Long? {
+        val expiry = expiresAt ?: return null
+        if (expiry <= 0L) return null
+        return (expiry - nowSeconds) / 86_400L
+    }
+
+    fun isRetiringSoon(nowSeconds: Long, windowDays: Int = 60): Boolean {
+        val days = retiresInDays(nowSeconds) ?: return false
+        return days in 0..windowDays.toLong()
+    }
+
+    /** Human label for the tiered-pricing cut-off, e.g. "272K". */
+    val overrideThresholdLabel: String
+        get() {
+            val tokens = overrideThresholdTokens ?: return ""
+            return if (tokens >= 1_000) "${tokens / 1_000}K" else tokens.toString()
+        }
 
     /**
      * Percentage change in blended price versus the previous sync.

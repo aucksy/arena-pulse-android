@@ -20,7 +20,10 @@ class AppContainer(context: Context) {
 
     val preferences = UserPreferences(appContext)
 
-    val catalogSource: ModelCatalogSource = OpenRouterApiClient(json = json)
+    val catalogSource: ModelCatalogSource = OpenRouterApiClient(
+        json = json,
+        userAgent = "ArenaPulse/${BuildConfig.VERSION_NAME} (Android)"
+    )
 
     val repository: LeaderboardRepository = LeaderboardRepository(
         cacheFile = File(appContext.filesDir, "leaderboard_cache.json"),

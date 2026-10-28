@@ -84,6 +84,7 @@ fun ModelDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val nowSeconds = remember { System.currentTimeMillis() / 1_000L }
 
     var dailyInputMillions by remember(model.id) { mutableStateOf(5f) }
     var dailyOutputMillions by remember(model.id) { mutableStateOf(1f) }
@@ -216,6 +217,8 @@ fun ModelDetailSheet(
                 if (model.supportsTools) Badge("TOOLS", ArenaGold)
                 if (model.supportsStructuredOutputs) Badge("JSON", ArenaTextSecondary)
                 if (model.supportsVision) Badge("VISION", ArenaCyan)
+                model.variantLabel?.let { Badge(it.uppercase(Locale.US), ArenaPurple) }
+                if (model.isRetiringSoon(nowSeconds)) Badge("RETIRING", ArenaDanger)
             }
 
             if (model.hasPriceChange) {
@@ -240,6 +243,30 @@ fun ModelDetailSheet(
                         color = if (percent < 0) ArenaEmerald else ArenaDanger,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                     )
+                }
+            }
+
+            model.retiresInDays(nowSeconds)?.let { days ->
+                if (days >= 0) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        color = ArenaDanger.copy(alpha = 0.10f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, ArenaDanger.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = if (days == 0L) {
+                                "OpenRouter retires this model today. Plan a migration."
+                            } else {
+                                "OpenRouter retires this model in $days day${if (days == 1L) "" else "s"}. " +
+                                    "Plan a migration."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ArenaDanger,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
                 }
             }
 
@@ -341,6 +368,29 @@ fun ModelDetailSheet(
                         style = MaterialTheme.typography.bodySmall,
                         color = ArenaTextPrimary
                     )
+                    model.cacheDiscountPercent?.let { discount ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "CACHED INPUT " +
+                                LeaderboardUseCases.formatPrice(model.cacheReadPricePerMillion ?: 0.0) +
+                                " /1M  \u00B7  " + String.format(Locale.US, "%.0f", discount) +
+                                "% cheaper for repeated prompts",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ArenaEmerald
+                        )
+                    }
+                    if (model.hasTieredPricing) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "TIERED  above ${model.overrideThresholdLabel} prompt tokens: " +
+                                LeaderboardUseCases.formatPrice(model.overrideInputPricePerMillion ?: 0.0) +
+                                " in / " +
+                                LeaderboardUseCases.formatPrice(model.overrideOutputPricePerMillion ?: 0.0) +
+                                " out per 1M",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ArenaGold
+                        )
+                    }
                 }
             }
 
@@ -429,7 +479,7 @@ fun ModelDetailSheet(
             Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = "Value score " + String.format(Locale.US, "%.1f", model.valueScore) +
+                text = "Value score " + LeaderboardUseCases.formatValueScore(model) +
                     " arena points per blended dollar. Monthly projection assumes 30 days.",
                 style = MaterialTheme.typography.bodySmall,
                 color = ArenaTextMuted

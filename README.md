@@ -21,7 +21,17 @@ No API key is required. No Room, Hilt, KSP or KAPT is used anywhere.
 - **Price-move tracking** — each sync is compared against the previous cache entry, so cards
   show a `▼ 12%` / `▲ 8%` badge when a provider changes pricing, and Signals lists the
   steepest drops.
-- **New-arrival badges** — models first seen within 60 days are tagged, with a New Arrivals
+- **Variant-aware catalog** — OpenRouter lists `:batch` and `:free` service variants as
+  separate models (87 of 464 in a live snapshot). They are hidden by default so value and
+  price rankings compare like-for-like models, and can be shown from the filter bar.
+- **Cached-input and tiered pricing** — the inspector shows the discounted cached-prompt rate
+  (often 90%+ below the standard input price) and the higher rate that applies above a
+  prompt-size cut-off, so long-context bills do not surprise anyone.
+- **Retirement warnings** — models with a published `expiration_date` are tagged `RETIRING`,
+  listed in Signals, and called out in the inspector with days remaining.
+- **CSV export** — share the ranking exactly as filtered and sorted on screen, ready for a
+  spreadsheet or procurement doc.
+- **New-arrival badges** — models first seen within 30 days are tagged, with a New Arrivals
   list in Signals.
 - **Model Inspector** — animated five-axis radar chart, rank context, share sheet, copyable
   model ID, capability badges and a daily token-volume cost simulator with Light / Standard /
@@ -31,7 +41,7 @@ No API key is required. No Room, Hilt, KSP or KAPT is used anywhere.
 - **Pareto Value Matrix** — log-scale cost vs. intelligence scatter plot with a highlighted
   frontier. Plots the top 40 by default with a "Show all" toggle for large catalogs.
 - **Market Signals** — best value, fastest, cheapest, coding/reasoning/agentic leaders, price
-  moves, new arrivals, open-weight watchlist and your watchlist.
+  moves, new arrivals, retiring models, open-weight watchlist and your watchlist.
 - **About and data settings** — version, snapshot freshness, data provenance, privacy notes,
   clear cache and resync, clear watchlist.
 - **Offline-first** — the merged catalog is cached as JSON in
@@ -87,6 +97,16 @@ All compilation happens in GitHub Actions; no local Android SDK is required.
 - Unit tests: `gradle testDebugUnitTest --stacktrace`
 - APK: `gradle assembleDebug --stacktrace`
 - Artifact: `ArenaPulse-Debug-APK`
+
+The test suite covers three layers:
+
+- **Pure JVM logic** (`LeaderboardLogicTest`) — ranking, search, Pareto frontier, cost maths,
+  price deltas, CSV export and the repository's cache/price-history merge.
+- **HTTP layer** (`OpenRouterApiClientTest`) — real OkHttp calls against MockWebServer,
+  including status/empty-body handling and tolerance of unknown JSON fields.
+- **Runtime rendering** (`ScreenRenderTest`, `UserPreferencesTest`) — Robolectric composes
+  every screen with realistic catalog data, drives search, and exercises the real
+  SharedPreferences watchlist.
 
 ## Releases
 

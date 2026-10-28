@@ -55,6 +55,7 @@ import java.util.Locale
 @Composable
 fun AboutSheet(
     modelCount: Int,
+    variantCount: Int,
     watchedCount: Int,
     lastUpdated: Long,
     sourceLabel: String,
@@ -122,6 +123,9 @@ fun AboutSheet(
 
             SectionCard(title = "CURRENT SNAPSHOT") {
                 InfoRow(label = "Models tracked", value = modelCount.toString())
+                if (variantCount > 0) {
+                    InfoRow(label = "Variants hidden", value = variantCount.toString())
+                }
                 InfoRow(
                     label = "Source",
                     value = when (sourceLabel) {
@@ -158,6 +162,14 @@ fun AboutSheet(
                 Text(
                     text = "Blended price = input \u00D7 0.75 + output \u00D7 0.25. Value score = arena score " +
                         "per blended dollar, floored at \$0.05 so free tiers do not divide by zero.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ArenaTextMuted
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "OpenRouter lists :batch and :free service variants as separate models. " +
+                        "They are hidden by default so value and price rankings compare like-for-like " +
+                        "models; enable them from the Rankings filter bar.",
                     style = MaterialTheme.typography.bodySmall,
                     color = ArenaTextMuted
                 )

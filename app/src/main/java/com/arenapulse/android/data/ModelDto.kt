@@ -26,13 +26,23 @@ data class ModelDto(
     @SerialName("context_length") val contextLength: Int = 0,
     val pricing: PricingDto = PricingDto(),
     val architecture: ArchitectureDto = ArchitectureDto(),
-    @SerialName("supported_parameters") val supportedParameters: List<String> = emptyList()
+    @SerialName("supported_parameters") val supportedParameters: List<String> = emptyList(),
+    @SerialName("expiration_date") val expirationDate: String? = null
 )
 
 @Serializable
 data class PricingDto(
     val prompt: String = "0",
-    val completion: String = "0"
+    val completion: String = "0",
+    @SerialName("input_cache_read") val inputCacheRead: String? = null,
+    val overrides: List<PricingOverrideDto> = emptyList()
+)
+
+@Serializable
+data class PricingOverrideDto(
+    @SerialName("min_prompt_tokens") val minPromptTokens: Int? = null,
+    val prompt: String? = null,
+    val completion: String? = null
 )
 
 @Serializable
@@ -73,6 +83,9 @@ fun ModelDto.toAiModel(
     previous: AiModel? = null
 ): AiModel {
     val params = supportedParameters.map { it.lowercase() }
+    val tier = pricing.overrides
+        .filter { (it.minPromptTokens ?: 0) > 0 && it.prompt != null }
+        .minByOrNull { it.minPromptTokens ?: Int.MAX_VALUE }
     return AiModel(
         id = id,
         name = name.ifBlank { id },
@@ -92,6 +105,22 @@ fun ModelDto.toAiModel(
         speedTokensPerSec = profile.speed,
         isOpenWeight = profile.openWeight,
         previousInputPricePerMillion = previous?.inputPricePerMillion,
-        previousOutputPricePerMillion = previous?.outputPricePerMillion
+        previousOutputPricePerMillion = previous?.outputPricePerMillion,
+        cacheReadPricePerMillion = pricing.inputCacheRead?.toPricePerMillion()?.takeIf { it > 0.0 },
+        overrideThresholdTokens = tier?.minPromptTokens,
+        overrideInputPricePerMillion = tier?.prompt?.toPricePerMillion(),
+        overrideOutputPricePerMillion = tier?.completion?.toPricePerMillion(),
+        expiresAt = expirationDate.toEpochSecondsOrNull()
     )
+}
+
+/** `expiration_date` is an ISO-8601 date (`2026-11-11`); blank/garbage becomes null. */
+private fun String?.toEpochSecondsOrNull(): Long? {
+    val raw = this?.trim().orEmpty()
+    if (raw.isEmpty()) return null
+    return runCatching {
+        java.time.LocalDate.parse(raw.take(10))
+            .atStartOfDay(java.time.ZoneOffset.UTC)
+            .toEpochSecond()
+    }.getOrNull()
 }

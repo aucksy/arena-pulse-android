@@ -30,7 +30,13 @@ object LeaderboardUseCases {
 
     const val DAYS_PER_MONTH = 30.0
     const val FRONTIER_CATEGORY_THRESHOLD = 85.0
-    const val NEW_ARRIVAL_WINDOW_DAYS = 60
+
+    /**
+     * A 30-day window keeps the NEW badge meaningful: the live catalog adds
+     * roughly 30 canonical models a month, so a 60-day window tags ~90 rows.
+     */
+    const val NEW_ARRIVAL_WINDOW_DAYS = 30
+    const val RETIRING_WINDOW_DAYS = 60
 
     fun filter(models: List<AiModel>, category: RankingCategory): List<AiModel> = when (category) {
         RankingCategory.ALL -> models
@@ -103,6 +109,76 @@ object LeaderboardUseCases {
         category: RankingCategory,
         mode: SortMode
     ): List<AiModel> = sort(filter(models, category), mode)
+
+    /**
+     * Canonical catalog entries only. OpenRouter lists `:batch` and `:free`
+     * service variants as separate models with different billing; leaving them in
+     * makes "Best Value" and the Pareto frontier point at batch jobs and
+     * rate-limited tiers rather than at a model you can actually call.
+     */
+    fun canonical(models: List<AiModel>): List<AiModel> = models.filter { !it.isVariant }
+
+    fun variantCount(models: List<AiModel>): Int = models.count { it.isVariant }
+
+    /** "FREE" instead of a four-digit points-per-dollar figure for zero-cost tiers. */
+    fun formatValueScore(model: AiModel): String =
+        if (model.isFree) "FREE" else String.format(Locale.US, "%.1f", model.valueScore)
+
+    /** Models with a published end-of-life date inside [windowDays], soonest first. */
+    fun retiringSoon(
+        models: List<AiModel>,
+        nowSeconds: Long,
+        windowDays: Int = RETIRING_WINDOW_DAYS,
+        limit: Int = 5
+    ): List<AiModel> = models
+        .filter { it.isRetiringSoon(nowSeconds, windowDays) }
+        .sortedBy { it.expiresAt ?: Long.MAX_VALUE }
+        .take(limit)
+
+    /**
+     * RFC 4180-ish CSV for the rows currently on screen, so the ranking can be
+     * dropped into a spreadsheet or a procurement doc.
+     */
+    fun toCsv(models: List<AiModel>): String {
+        val header = listOf(
+            "rank", "model", "provider", "arena_score", "coding", "reasoning", "agentic",
+            "speed_tok_per_sec", "context_tokens", "input_usd_per_million",
+            "output_usd_per_million", "blended_usd_per_million", "value_score",
+            "open_weight", "variant", "model_id"
+        ).joinToString(",")
+
+        val rows = models.mapIndexed { index, model ->
+            listOf(
+                (index + 1).toString(),
+                model.name,
+                model.provider,
+                oneDecimal(model.overallScore),
+                oneDecimal(model.codingScore),
+                oneDecimal(model.reasoningScore),
+                oneDecimal(model.agenticScore),
+                String.format(Locale.US, "%.0f", model.speedTokensPerSec),
+                model.contextLength.toString(),
+                fourDecimals(model.inputPricePerMillion),
+                fourDecimals(model.outputPricePerMillion),
+                fourDecimals(model.blendedPricePerMillion),
+                if (model.isFree) "free" else oneDecimal(model.valueScore),
+                if (model.isOpenWeight) "yes" else "no",
+                model.variantLabel ?: "",
+                model.id
+            ).joinToString(",") { csvCell(it) }
+        }
+
+        return (listOf(header) + rows).joinToString("\n")
+    }
+
+    private fun csvCell(value: String): String {
+        val needsQuoting = value.any { it == ',' || it == '"' || it == '\n' || it == '\r' }
+        return if (needsQuoting) "\"" + value.replace("\"", "\"\"") + "\"" else value
+    }
+
+    private fun oneDecimal(value: Double): String = String.format(Locale.US, "%.1f", value)
+
+    private fun fourDecimals(value: Double): String = String.format(Locale.US, "%.4f", value)
 
     /**
      * One call for the rankings screen: search, provider and watchlist narrowing,

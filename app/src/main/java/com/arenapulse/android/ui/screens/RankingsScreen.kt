@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CompareArrows
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -68,6 +69,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -80,6 +82,7 @@ import com.arenapulse.android.domain.AiModel
 import com.arenapulse.android.domain.LeaderboardUseCases
 import com.arenapulse.android.domain.RankingCategory
 import com.arenapulse.android.domain.SortMode
+import com.arenapulse.android.ui.shareText
 import com.arenapulse.android.ui.theme.ArenaBackground
 import com.arenapulse.android.ui.theme.ArenaBorder
 import com.arenapulse.android.ui.theme.ArenaBronze
@@ -110,10 +113,13 @@ fun RankingsScreen(
     sourceLabel: String,
     errorMessage: String?,
     watchedIds: Set<String>,
+    includeVariants: Boolean,
+    variantCount: Int,
     onRefresh: () -> Unit,
     onModelClick: (AiModel) -> Unit,
     onToggleWatch: (AiModel) -> Unit,
     onCompare: (AiModel) -> Unit,
+    onToggleVariants: (Boolean) -> Unit,
     onOpenAbout: () -> Unit
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -122,6 +128,7 @@ fun RankingsScreen(
     var provider by rememberSaveable { mutableStateOf<String?>(null) }
     var watchlistOnly by rememberSaveable { mutableStateOf(false) }
 
+    val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val nowSeconds = remember { System.currentTimeMillis() / 1_000L }
     val providerOptions = remember(models) { LeaderboardUseCases.providers(models).take(10) }
@@ -140,6 +147,9 @@ fun RankingsScreen(
     val podium = remember(models) { models.sortedByDescending { it.overallScore }.take(3) }
     val newArrivalIds = remember(models, nowSeconds) {
         models.filter { LeaderboardUseCases.isNewArrival(it, nowSeconds) }.map { it.id }.toSet()
+    }
+    val retiringIds = remember(models, nowSeconds) {
+        models.filter { it.isRetiringSoon(nowSeconds) }.map { it.id }.toSet()
     }
 
     PullToRefreshBox(
@@ -165,6 +175,24 @@ fun RankingsScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = ArenaTextMuted,
                             modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            if (displayed.isNotEmpty()) {
+                                shareText(
+                                    context = context,
+                                    subject = "ArenaPulse ranking export",
+                                    body = LeaderboardUseCases.toCsv(displayed)
+                                )
+                            }
+                        },
+                        enabled = displayed.isNotEmpty()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.FileDownload,
+                            contentDescription = "Export the current ${displayed.size} ranked models as CSV",
+                            tint = if (displayed.isNotEmpty()) ArenaTextSecondary else ArenaTextMuted
                         )
                     }
                     IconButton(onClick = onOpenAbout) {
@@ -248,7 +276,10 @@ fun RankingsScreen(
                     onSelect = { category = it },
                     watchlistOnly = watchlistOnly,
                     watchedCount = watchedIds.size,
-                    onToggleWatchlist = { watchlistOnly = !watchlistOnly }
+                    onToggleWatchlist = { watchlistOnly = !watchlistOnly },
+                    includeVariants = includeVariants,
+                    variantCount = variantCount,
+                    onToggleVariants = onToggleVariants
                 )
             }
 
@@ -319,6 +350,7 @@ fun RankingsScreen(
                         model = model,
                         isWatched = model.id in watchedIds,
                         isNew = model.id in newArrivalIds,
+                        isRetiring = model.id in retiringIds,
                         onClick = { onModelClick(model) },
                         onToggleWatch = { onToggleWatch(model) },
                         onCompare = { onCompare(model) },
@@ -675,7 +707,10 @@ private fun FilterBar(
     onSelect: (RankingCategory) -> Unit,
     watchlistOnly: Boolean,
     watchedCount: Int,
-    onToggleWatchlist: () -> Unit
+    onToggleWatchlist: () -> Unit,
+    includeVariants: Boolean,
+    variantCount: Int,
+    onToggleVariants: (Boolean) -> Unit
 ) {
     Column {
         Text(
@@ -721,6 +756,34 @@ private fun FilterBar(
                     )
                 )
             }
+            if (variantCount > 0 || includeVariants) {
+                item(key = "variants") {
+                    FilterChip(
+                        selected = includeVariants,
+                        onClick = { onToggleVariants(!includeVariants) },
+                        label = {
+                            Text(
+                                if (includeVariants) "Variants shown" else "Variants $variantCount"
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = ArenaSurface,
+                            labelColor = ArenaTextSecondary,
+                            selectedContainerColor = ArenaPurple.copy(alpha = 0.16f),
+                            selectedLabelColor = ArenaPurple
+                        )
+                    )
+                }
+            }
+        }
+        if (!includeVariants && variantCount > 0) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "$variantCount batch/free variants hidden so value and price rankings " +
+                    "compare like-for-like models.",
+                style = MaterialTheme.typography.bodySmall,
+                color = ArenaTextMuted
+            )
         }
     }
 }
@@ -788,6 +851,7 @@ private fun ModelRow(
     model: AiModel,
     isWatched: Boolean,
     isNew: Boolean,
+    isRetiring: Boolean,
     onClick: () -> Unit,
     onToggleWatch: () -> Unit,
     onCompare: () -> Unit,
@@ -819,6 +883,10 @@ private fun ModelRow(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
                         )
+                        if (isRetiring) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            TinyTag(text = "RETIRING", color = ArenaDanger)
+                        }
                         if (isNew) {
                             Spacer(modifier = Modifier.width(6.dp))
                             TinyTag(text = "NEW", color = ArenaCyan)
@@ -826,6 +894,10 @@ private fun ModelRow(
                         if (model.isOpenWeight) {
                             Spacer(modifier = Modifier.width(6.dp))
                             TinyTag(text = "OPEN", color = ArenaEmerald)
+                        }
+                        model.variantLabel?.let { variant ->
+                            Spacer(modifier = Modifier.width(6.dp))
+                            TinyTag(text = variant.uppercase(Locale.US), color = ArenaPurple)
                         }
                     }
                     Text(
@@ -882,7 +954,7 @@ private fun ModelRow(
                 )
                 Spacer(modifier = Modifier.weight(1f))
                 Text(
-                    text = "VALUE " + String.format(Locale.US, "%.1f", model.valueScore),
+                    text = "VALUE " + LeaderboardUseCases.formatValueScore(model),
                     style = MaterialTheme.typography.labelSmall,
                     color = ArenaPurple
                 )

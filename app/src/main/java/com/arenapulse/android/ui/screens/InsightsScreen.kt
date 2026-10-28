@@ -37,6 +37,7 @@ import com.arenapulse.android.domain.AiModel
 import com.arenapulse.android.domain.LeaderboardUseCases
 import com.arenapulse.android.ui.theme.ArenaBorder
 import com.arenapulse.android.ui.theme.ArenaCyan
+import com.arenapulse.android.ui.theme.ArenaDanger
 import com.arenapulse.android.ui.theme.ArenaEmerald
 import com.arenapulse.android.ui.theme.ArenaGold
 import com.arenapulse.android.ui.theme.ArenaPurple
@@ -61,6 +62,9 @@ fun InsightsScreen(
             .take(5)
     }
     val priceDrops = remember(models) { LeaderboardUseCases.biggestPriceDrops(models, 3) }
+    val retiring = remember(models, nowSeconds) {
+        LeaderboardUseCases.retiringSoon(models, nowSeconds)
+    }
     val watchedModels = remember(models, watchedIds) {
         models.filter { it.id in watchedIds }.sortedByDescending { it.overallScore }
     }
@@ -133,7 +137,7 @@ fun InsightsScreen(
                 LeaderHighlight(
                     title = "Best value",
                     model = it,
-                    metric = String.format(Locale.US, "%.1f", it.valueScore) + " pts / $",
+                    metric = LeaderboardUseCases.formatValueScore(it) + " pts / $",
                     accent = ArenaEmerald
                 )
             },
@@ -255,6 +259,21 @@ fun InsightsScreen(
                     } else {
                         "new"
                     }
+                },
+                onInspect = onInspect
+            )
+        }
+
+        if (retiring.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(14.dp))
+            CompactModelSection(
+                title = "RETIRING SOON",
+                emptyText = "",
+                models = retiring,
+                accent = ArenaDanger,
+                valueFor = { model ->
+                    val days = model.retiresInDays(nowSeconds) ?: 0L
+                    if (days <= 0L) "today" else "${days}d left"
                 },
                 onInspect = onInspect
             )

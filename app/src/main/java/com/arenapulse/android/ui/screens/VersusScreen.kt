@@ -414,7 +414,7 @@ fun VersusScreen(
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text("A VALUE SCORE", style = MaterialTheme.typography.labelSmall, color = ArenaCyan)
                     Text(
-                        String.format(Locale.US, "%.1f", left.valueScore),
+                        LeaderboardUseCases.formatValueScore(left),
                         style = MaterialTheme.typography.titleLarge,
                         color = ArenaTextPrimary
                     )
@@ -429,7 +429,7 @@ fun VersusScreen(
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text("B VALUE SCORE", style = MaterialTheme.typography.labelSmall, color = ArenaPurple)
                     Text(
-                        String.format(Locale.US, "%.1f", right.valueScore),
+                        LeaderboardUseCases.formatValueScore(right),
                         style = MaterialTheme.typography.titleLarge,
                         color = ArenaTextPrimary
                     )

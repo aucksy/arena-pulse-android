@@ -132,6 +132,8 @@ fun MainScreen(viewModel: LeaderboardViewModel) {
                         sourceLabel = state.sourceLabel,
                         errorMessage = state.errorMessage,
                         watchedIds = state.watchedIds,
+                        includeVariants = state.includeVariants,
+                        variantCount = state.variantCount,
                         onRefresh = { viewModel.refresh() },
                         onModelClick = { selectedModelId = it.id },
                         onToggleWatch = { viewModel.toggleWatch(it.id) },
@@ -143,6 +145,7 @@ fun MainScreen(viewModel: LeaderboardViewModel) {
                                 ?.id
                             selectedTab = ArenaTab.VERSUS
                         },
+                        onToggleVariants = { viewModel.setIncludeVariants(it) },
                         onOpenAbout = { showAbout = true }
                     )
 
@@ -190,6 +193,7 @@ fun MainScreen(viewModel: LeaderboardViewModel) {
     if (showAbout) {
         AboutSheet(
             modelCount = state.models.size,
+            variantCount = state.variantCount,
             watchedCount = state.watchedIds.size,
             lastUpdated = state.lastUpdated,
             sourceLabel = state.sourceLabel,

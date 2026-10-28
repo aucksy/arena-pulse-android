@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.arenapulse.android.data.LeaderboardRepository
 import com.arenapulse.android.data.UserPreferences
 import com.arenapulse.android.domain.AiModel
+import com.arenapulse.android.domain.LeaderboardUseCases
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,18 +15,24 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class LeaderboardUiState(
+    val allModels: List<AiModel> = emptyList(),
     val models: List<AiModel> = emptyList(),
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val lastUpdated: Long = 0L,
     val sourceLabel: String = "seed",
     val errorMessage: String? = null,
-    val watchedIds: Set<String> = emptySet()
+    val watchedIds: Set<String> = emptySet(),
+    val includeVariants: Boolean = false
 ) {
     /** True when the served snapshot is older than a day. */
     val isStale: Boolean
         get() = lastUpdated > 0L &&
             System.currentTimeMillis() - lastUpdated > STALE_AFTER_MILLIS
+
+    /** `:batch` / `:free` alternates hidden from the current view. */
+    val variantCount: Int
+        get() = allModels.size - models.size
 
     companion object {
         const val STALE_AFTER_MILLIS = 24L * 60L * 60L * 1_000L
@@ -47,9 +54,10 @@ class LeaderboardViewModel(
     init {
         viewModelScope.launch {
             val cached = repository.load(forceRefresh = false)
-            _uiState.update {
-                it.copy(
-                    models = cached.models,
+            _uiState.update { state ->
+                state.copy(
+                    allModels = cached.models,
+                    models = visible(cached.models, state.includeVariants),
                     isLoading = false,
                     lastUpdated = cached.lastUpdated,
                     sourceLabel = cached.sourceLabel
@@ -69,9 +77,10 @@ class LeaderboardViewModel(
         refreshJob = viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = showSpinner, errorMessage = null) }
             val snapshot = repository.load(forceRefresh = true)
-            _uiState.update {
-                it.copy(
-                    models = snapshot.models,
+            _uiState.update { state ->
+                state.copy(
+                    allModels = snapshot.models,
+                    models = visible(snapshot.models, state.includeVariants),
                     isLoading = false,
                     isRefreshing = false,
                     lastUpdated = snapshot.lastUpdated,
@@ -85,6 +94,22 @@ class LeaderboardViewModel(
             }
         }
     }
+
+    /**
+     * Shows or hides `:batch` / `:free` service variants. The full catalog stays in
+     * [LeaderboardUiState.allModels] so the toggle is instant and price history survives.
+     */
+    fun setIncludeVariants(include: Boolean) {
+        _uiState.update { state ->
+            state.copy(
+                includeVariants = include,
+                models = visible(state.allModels, include)
+            )
+        }
+    }
+
+    private fun visible(models: List<AiModel>, includeVariants: Boolean): List<AiModel> =
+        if (includeVariants) models else LeaderboardUseCases.canonical(models)
 
     fun toggleWatch(modelId: String) {
         val updated = preferences.toggleWatch(modelId)

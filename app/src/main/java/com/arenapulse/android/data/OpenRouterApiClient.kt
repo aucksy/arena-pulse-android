@@ -20,14 +20,15 @@ interface ModelCatalogSource {
 class OpenRouterApiClient(
     private val httpClient: OkHttpClient = defaultClient(),
     private val json: Json = ArenaJson,
-    private val endpoint: String = ENDPOINT
+    private val endpoint: String = ENDPOINT,
+    private val userAgent: String = DEFAULT_USER_AGENT
 ) : ModelCatalogSource {
 
     override suspend fun fetchModels(): List<ModelDto> = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(endpoint)
             .header("Accept", "application/json")
-            .header("User-Agent", "ArenaPulse/1.0 (Android)")
+            .header("User-Agent", userAgent)
             .get()
             .build()
 
@@ -42,6 +43,7 @@ class OpenRouterApiClient(
 
     companion object {
         const val ENDPOINT = "https://openrouter.ai/api/v1/models"
+        const val DEFAULT_USER_AGENT = "ArenaPulse/1.1 (Android)"
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)

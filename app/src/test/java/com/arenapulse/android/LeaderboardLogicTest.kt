@@ -524,6 +524,154 @@ class LeaderboardLogicTest {
         assertEquals(-50.0, model.priceChangePercent ?: 0.0, 0.0001)
     }
 
+    @Test
+    fun canonical_hidesBatchAndFreeVariants() {
+        val canonical = AiModel("openai/gpt-6.1", "GPT-6.1", "OpenAI", overallScore = 95.0)
+        val batch = AiModel("openai/gpt-6.1:batch", "GPT-6.1 (batch)", "OpenAI", overallScore = 95.0)
+        val free = AiModel("openai/gpt-6.1:free", "GPT-6.1 (free)", "OpenAI", overallScore = 95.0)
+        val models = listOf(canonical, batch, free)
+
+        assertEquals(listOf("openai/gpt-6.1"), LeaderboardUseCases.canonical(models).map { it.id })
+        assertEquals(2, LeaderboardUseCases.variantCount(models))
+        assertEquals("batch", batch.variantLabel)
+        assertNull(canonical.variantLabel)
+        assertFalse(canonical.isVariant)
+    }
+
+    @Test
+    fun canonicalKeepsValueRankingHonest() {
+        // A 50%-cheaper batch job must not outrank the model it shadows.
+        val canonical = AiModel(
+            id = "openai/gpt-6.1",
+            name = "GPT-6.1",
+            provider = "OpenAI",
+            inputPricePerMillion = 1.0,
+            outputPricePerMillion = 5.0,
+            overallScore = 95.0
+        )
+        val batch = canonical.copy(
+            id = "openai/gpt-6.1:batch",
+            inputPricePerMillion = 0.5,
+            outputPricePerMillion = 2.5
+        )
+
+        val withVariants = LeaderboardUseCases.sort(listOf(canonical, batch), SortMode.VALUE)
+        assertEquals("openai/gpt-6.1:batch", withVariants.first().id)
+
+        val withoutVariants = LeaderboardUseCases.sort(
+            LeaderboardUseCases.canonical(listOf(canonical, batch)),
+            SortMode.VALUE
+        )
+        assertEquals(listOf("openai/gpt-6.1"), withoutVariants.map { it.id })
+    }
+
+    @Test
+    fun formatValueScore_labelsFreeTiers() {
+        val free = AiModel(
+            id = "acme/free",
+            name = "Free",
+            provider = "Acme",
+            inputPricePerMillion = 0.0,
+            outputPricePerMillion = 0.0,
+            overallScore = 74.0
+        )
+        val paid = AiModel(
+            id = "acme/paid",
+            name = "Paid",
+            provider = "Acme",
+            inputPricePerMillion = 2.0,
+            outputPricePerMillion = 4.0,
+            overallScore = 90.0
+        )
+
+        assertEquals("FREE", LeaderboardUseCases.formatValueScore(free))
+        assertEquals("36.0", LeaderboardUseCases.formatValueScore(paid))
+    }
+
+    @Test
+    fun csv_exportsHeaderAndEscapesCommas() {
+        val model = AiModel(
+            id = "acme/model,one",
+            name = "Model, One",
+            provider = "Acme",
+            contextLength = 128_000,
+            inputPricePerMillion = 1.0,
+            outputPricePerMillion = 2.0,
+            overallScore = 88.5,
+            isOpenWeight = true
+        )
+
+        val lines = LeaderboardUseCases.toCsv(listOf(model)).lines()
+
+        assertEquals(2, lines.size)
+        assertTrue(lines[0].startsWith("rank,model,provider,arena_score"))
+        assertTrue(lines[1].startsWith("1,\"Model, One\",Acme,88.5"))
+        assertTrue(lines[1].contains("\"acme/model,one\""))
+        assertTrue(lines[1].endsWith("yes,,acme/model,one\""))
+    }
+
+    @Test
+    fun dto_carriesCachePricingTieredPricingAndExpiry() {
+        val dto = ModelDto(
+            id = "openai/gpt-6.1-terra-pro",
+            name = "GPT-6.1 Terra Pro",
+            contextLength = 1_050_000,
+            pricing = PricingDto(
+                prompt = "0.000001",
+                completion = "0.000005",
+                inputCacheRead = "0.00000005",
+                overrides = listOf(
+                    com.arenapulse.android.data.PricingOverrideDto(
+                        minPromptTokens = 272_000,
+                        prompt = "0.000002",
+                        completion = "0.0000075"
+                    )
+                )
+            ),
+            expirationDate = "2026-11-11"
+        )
+
+        val model = dto.toAiModel()
+
+        assertEquals(0.05, model.cacheReadPricePerMillion ?: 0.0, 0.0001)
+        assertEquals(95.0, model.cacheDiscountPercent ?: 0.0, 0.0001)
+        assertTrue(model.hasCachePricing)
+        assertTrue(model.hasTieredPricing)
+        assertEquals("272K", model.overrideThresholdLabel)
+        assertEquals(2.0, model.overrideInputPricePerMillion ?: 0.0, 0.0001)
+        assertEquals(7.5, model.overrideOutputPricePerMillion ?: 0.0, 0.0001)
+        assertTrue(model.expiresAt ?: 0L > 0L)
+        assertTrue(model.isRetiringSoon(model.expiresAt ?: 0L))
+    }
+
+    @Test
+    fun retiringSoon_ordersByExpiryAndIgnoresFarDates() {
+        val now = 1_800_000_000L
+        val soon = AiModel("a/soon", "Soon", "A", expiresAt = now + 5 * 86_400L)
+        val later = AiModel("b/later", "Later", "B", expiresAt = now + 30 * 86_400L)
+        val far = AiModel("c/far", "Far", "C", expiresAt = now + 400 * 86_400L)
+        val none = AiModel("d/none", "None", "D")
+
+        assertEquals(
+            listOf("a/soon", "b/later"),
+            LeaderboardUseCases.retiringSoon(listOf(later, far, none, soon), now).map { it.id }
+        )
+        assertEquals(5L, soon.retiresInDays(now) ?: 0L)
+        assertNull(none.retiresInDays(now))
+    }
+
+    @Test
+    fun newArrivalWindow_isThirtyDays() {
+        assertEquals(30, LeaderboardUseCases.NEW_ARRIVAL_WINDOW_DAYS)
+
+        val now = 2_000_000_000L
+        val inside = AiModel("in", "In", "Test", created = now - 20 * 86_400L)
+        val outside = AiModel("out", "Out", "Test", created = now - 45 * 86_400L)
+
+        assertTrue(LeaderboardUseCases.isNewArrival(inside, now))
+        assertFalse(LeaderboardUseCases.isNewArrival(outside, now))
+    }
+
     private class FakeCatalogSource(
         private val block: suspend () -> List<ModelDto>
     ) : ModelCatalogSource {
