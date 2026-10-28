@@ -68,6 +68,20 @@ All compilation happens in GitHub Actions; no local Android SDK is required.
 - APK: `gradle assembleDebug --stacktrace`
 - Artifact: `ArenaPulse-Debug-APK`
 
+## Releases
+
+Download the latest APK from
+[GitHub Releases](https://github.com/aucksy/arena-pulse-android/releases/latest).
+
+The release workflow (`.github/workflows/release.yml`) runs the unit tests, builds the
+debug APK and publishes it as a GitHub Release asset. It can be triggered by pushing a
+`v*` tag or manually from the Actions tab with a tag name such as `v1.0.1`.
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
 ## Stack
 
 Kotlin 2.0.21, AGP 8.7.3, Gradle 8.10.2, Jetpack Compose (BOM 2024.11.00),
