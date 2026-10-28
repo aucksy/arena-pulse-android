@@ -65,7 +65,7 @@ fun providerDisplayName(modelId: String): String = when (modelId.substringBefore
     "nvidia" -> "NVIDIA"
     "openrouter" -> "OpenRouter"
     else -> modelId.substringBefore('/')
-        .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() })
+        .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
 }
 
 fun ModelDto.toAiModel(
