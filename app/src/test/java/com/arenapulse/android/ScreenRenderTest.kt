@@ -4,7 +4,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
 import com.arenapulse.android.domain.AiModel
 import com.arenapulse.android.ui.screens.FrontierChartScreen
 import com.arenapulse.android.ui.screens.InsightsScreen
@@ -152,7 +154,6 @@ class ScreenRenderTest {
         assertVisible("Qwen4 Max")
         assertVisible("RETIRING")
         assertVisible("BATCH")
-        assertVisible("Variants 1")
         assertVisible("batch/free variants hidden")
     }
 
@@ -180,11 +181,40 @@ class ScreenRenderTest {
 
         assertVisible("Qwen4 Max")
 
-        composeRule.onNode(hasSetTextAction()).performTextInput("qwen")
+        composeRule.onNode(hasSetTextAction()).performTextReplacement("qwen")
         composeRule.waitForIdle()
 
         assertVisible("Qwen4 Max")
         assertNotVisible("GPT-6.1 Terra Pro")
+    }
+
+    @Test
+    fun rankings_variantToggleInvokesCallback() {
+        var requested: Boolean? = null
+        render {
+            RankingsScreen(
+                models = models,
+                isLoading = false,
+                isRefreshing = false,
+                lastUpdated = System.currentTimeMillis(),
+                sourceLabel = "live",
+                errorMessage = null,
+                watchedIds = emptySet(),
+                includeVariants = false,
+                variantCount = 1,
+                onRefresh = {},
+                onModelClick = {},
+                onToggleWatch = {},
+                onCompare = {},
+                onToggleVariants = { requested = it },
+                onOpenAbout = {}
+            )
+        }
+
+        composeRule.onNodeWithText("Show").performClick()
+        composeRule.waitForIdle()
+
+        assertTrue("Variant toggle should request variants to be shown", requested == true)
     }
 
     @Test

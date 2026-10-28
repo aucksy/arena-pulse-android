@@ -56,6 +56,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -756,34 +757,31 @@ private fun FilterBar(
                     )
                 )
             }
-            if (variantCount > 0 || includeVariants) {
-                item(key = "variants") {
-                    FilterChip(
-                        selected = includeVariants,
-                        onClick = { onToggleVariants(!includeVariants) },
-                        label = {
-                            Text(
-                                if (includeVariants) "Variants shown" else "Variants $variantCount"
-                            )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = ArenaSurface,
-                            labelColor = ArenaTextSecondary,
-                            selectedContainerColor = ArenaPurple.copy(alpha = 0.16f),
-                            selectedLabelColor = ArenaPurple
-                        )
+        }
+        if (variantCount > 0 || includeVariants) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = if (includeVariants) {
+                        "$variantCount batch/free variants shown"
+                    } else {
+                        "$variantCount batch/free variants hidden"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ArenaTextMuted,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(
+                    onClick = { onToggleVariants(!includeVariants) },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        text = if (includeVariants) "Hide" else "Show",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = ArenaPurple
                     )
                 }
             }
-        }
-        if (!includeVariants && variantCount > 0) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "$variantCount batch/free variants hidden so value and price rankings " +
-                    "compare like-for-like models.",
-                style = MaterialTheme.typography.bodySmall,
-                color = ArenaTextMuted
-            )
         }
     }
 }
