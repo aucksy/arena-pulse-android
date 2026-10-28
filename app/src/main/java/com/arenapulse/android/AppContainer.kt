@@ -5,6 +5,7 @@ import com.arenapulse.android.data.ArenaJson
 import com.arenapulse.android.data.LeaderboardRepository
 import com.arenapulse.android.data.ModelCatalogSource
 import com.arenapulse.android.data.OpenRouterApiClient
+import com.arenapulse.android.data.UserPreferences
 import java.io.File
 
 /**
@@ -13,12 +14,16 @@ import java.io.File
  */
 class AppContainer(context: Context) {
 
+    private val appContext = context.applicationContext
+
     val json = ArenaJson
+
+    val preferences = UserPreferences(appContext)
 
     val catalogSource: ModelCatalogSource = OpenRouterApiClient(json = json)
 
     val repository: LeaderboardRepository = LeaderboardRepository(
-        cacheFile = File(context.filesDir, "leaderboard_cache.json"),
+        cacheFile = File(appContext.filesDir, "leaderboard_cache.json"),
         catalogSource = catalogSource,
         json = json
     )

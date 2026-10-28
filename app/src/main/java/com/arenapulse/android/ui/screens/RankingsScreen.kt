@@ -29,19 +29,33 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CompareArrows
+import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,7 +68,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -82,6 +100,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RankingsScreen(
     models: List<AiModel>,
@@ -90,129 +109,280 @@ fun RankingsScreen(
     lastUpdated: Long,
     sourceLabel: String,
     errorMessage: String?,
+    watchedIds: Set<String>,
     onRefresh: () -> Unit,
-    onModelClick: (AiModel) -> Unit
+    onModelClick: (AiModel) -> Unit,
+    onToggleWatch: (AiModel) -> Unit,
+    onCompare: (AiModel) -> Unit,
+    onOpenAbout: () -> Unit
 ) {
+    var query by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf(RankingCategory.ALL) }
     var sortMode by rememberSaveable { mutableStateOf(SortMode.OVERALL) }
+    var provider by rememberSaveable { mutableStateOf<String?>(null) }
+    var watchlistOnly by rememberSaveable { mutableStateOf(false) }
 
-    val displayed = remember(models, category, sortMode) {
-        LeaderboardUseCases.apply(models, category, sortMode)
+    val focusManager = LocalFocusManager.current
+    val nowSeconds = remember { System.currentTimeMillis() / 1_000L }
+    val providerOptions = remember(models) { LeaderboardUseCases.providers(models).take(10) }
+
+    val displayed = remember(models, query, category, sortMode, provider, watchlistOnly, watchedIds) {
+        LeaderboardUseCases.refine(
+            models = models,
+            query = query,
+            category = category,
+            mode = sortMode,
+            provider = provider,
+            watchedIds = watchedIds,
+            watchlistOnly = watchlistOnly
+        )
     }
-    val podium = remember(models) {
-        models.sortedByDescending { it.overallScore }.take(3)
+    val podium = remember(models) { models.sortedByDescending { it.overallScore }.take(3) }
+    val newArrivalIds = remember(models, nowSeconds) {
+        models.filter { LeaderboardUseCases.isNewArrival(it, nowSeconds) }.map { it.id }.toSet()
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        modifier = Modifier.fillMaxSize()
     ) {
-        item(key = "header") {
-            Column {
-                Text(
-                    text = "Live Rankings",
-                    style = androidx.compose.material3.MaterialTheme.typography.headlineMedium,
-                    color = ArenaTextPrimary
-                )
-                Text(
-                    text = "Frontier intelligence, throughput and unit economics",
-                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                    color = ArenaTextMuted,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
-        }
-
-        item(key = "live-status") {
-            LiveStatusHeader(
-                modelCount = models.size,
-                lastUpdated = lastUpdated,
-                sourceLabel = sourceLabel,
-                isRefreshing = isRefreshing,
-                onRefresh = onRefresh
-            )
-        }
-
-        if (podium.isNotEmpty()) {
-            item(key = "podium") {
-                PodiumCarousel(models = podium, onModelClick = onModelClick)
-            }
-        }
-
-        item(key = "filters") {
-            FilterBar(selected = category, onSelect = { category = it })
-        }
-
-        item(key = "sort") {
-            SortBar(selected = sortMode, onSelect = { sortMode = it })
-        }
-
-        if (errorMessage != null) {
-            item(key = "error") {
-                Surface(
-                    color = ArenaDanger.copy(alpha = 0.10f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, ArenaDanger.copy(alpha = 0.35f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = errorMessage,
-                        color = ArenaDanger,
-                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                    )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item(key = "header") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Live Rankings",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = ArenaTextPrimary
+                        )
+                        Text(
+                            text = "Frontier intelligence, throughput and unit economics",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ArenaTextMuted,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    IconButton(onClick = onOpenAbout) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "About ArenaPulse and data settings",
+                            tint = ArenaTextSecondary
+                        )
+                    }
                 }
             }
-        }
 
-        if (isLoading && models.isEmpty()) {
-            item(key = "loading") {
-                Box(
+            item(key = "live-status") {
+                LiveStatusHeader(
+                    modelCount = models.size,
+                    lastUpdated = lastUpdated,
+                    sourceLabel = sourceLabel,
+                    isRefreshing = isRefreshing,
+                    onRefresh = onRefresh
+                )
+            }
+
+            if (podium.isNotEmpty() && query.isBlank() && !watchlistOnly && provider == null) {
+                item(key = "podium") {
+                    PodiumCarousel(models = podium, onModelClick = onModelClick)
+                }
+            }
+
+            item(key = "search") {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(180.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = ArenaCyan, strokeWidth = 2.dp)
-                }
+                        .semantics { contentDescription = "Search models by name, provider or slug" },
+                    placeholder = {
+                        Text(
+                            text = "Search ${models.size} models",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.Search,
+                            contentDescription = null,
+                            tint = ArenaTextMuted
+                        )
+                    },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { query = "" }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = "Clear search",
+                                    tint = ArenaTextSecondary
+                                )
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = ArenaTextPrimary,
+                        unfocusedTextColor = ArenaTextPrimary,
+                        focusedContainerColor = ArenaSurface,
+                        unfocusedContainerColor = ArenaSurface,
+                        cursorColor = ArenaCyan,
+                        focusedBorderColor = ArenaCyan.copy(alpha = 0.6f),
+                        unfocusedBorderColor = ArenaBorder,
+                        focusedPlaceholderColor = ArenaTextMuted,
+                        unfocusedPlaceholderColor = ArenaTextMuted
+                    )
+                )
             }
-        } else if (displayed.isEmpty()) {
-            item(key = "empty") {
-                Surface(
-                    color = ArenaSurface,
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, ArenaBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "No models match this filter yet. Try another category or refresh the live sync.",
-                        color = ArenaTextSecondary,
-                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(18.dp)
+
+            item(key = "filters") {
+                FilterBar(
+                    selected = category,
+                    onSelect = { category = it },
+                    watchlistOnly = watchlistOnly,
+                    watchedCount = watchedIds.size,
+                    onToggleWatchlist = { watchlistOnly = !watchlistOnly }
+                )
+            }
+
+            item(key = "sort") {
+                SortBar(selected = sortMode, onSelect = { sortMode = it })
+            }
+
+            if (providerOptions.size > 1) {
+                item(key = "providers") {
+                    ProviderBar(
+                        providers = providerOptions,
+                        selected = provider,
+                        onSelect = { provider = if (provider == it) null else it }
                     )
                 }
             }
-        } else {
-            itemsIndexed(
-                items = displayed,
-                key = { _, model -> model.id }
-            ) { index, model ->
-                ModelRow(
-                    rank = index + 1,
-                    model = model,
-                    onClick = { onModelClick(model) },
-                    modifier = Modifier.animateItem()
+
+            if (errorMessage != null) {
+                item(key = "error") {
+                    Surface(
+                        color = ArenaDanger.copy(alpha = 0.10f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, ArenaDanger.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = errorMessage,
+                            color = ArenaDanger,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                        )
+                    }
+                }
+            }
+
+            if (isLoading && models.isEmpty()) {
+                item(key = "loading") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = ArenaCyan, strokeWidth = 2.dp)
+                    }
+                }
+            } else if (displayed.isEmpty()) {
+                item(key = "empty") {
+                    EmptyState(
+                        query = query,
+                        watchlistOnly = watchlistOnly,
+                        provider = provider,
+                        onClear = {
+                            query = ""
+                            watchlistOnly = false
+                            provider = null
+                            category = RankingCategory.ALL
+                        }
+                    )
+                }
+            } else {
+                itemsIndexed(
+                    items = displayed,
+                    key = { _, model -> model.id }
+                ) { index, model ->
+                    ModelRow(
+                        rank = index + 1,
+                        model = model,
+                        isWatched = model.id in watchedIds,
+                        isNew = model.id in newArrivalIds,
+                        onClick = { onModelClick(model) },
+                        onToggleWatch = { onToggleWatch(model) },
+                        onCompare = { onCompare(model) },
+                        modifier = Modifier.animateItem()
+                    )
+                }
+            }
+
+            item(key = "footer") {
+                Text(
+                    text = "Scores blend a curated arena benchmark registry with live OpenRouter catalog data. " +
+                        "Blended price weights input 75% / output 25%. Pull down to re-sync.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ArenaTextMuted,
+                    modifier = Modifier.padding(top = 8.dp)
                 )
             }
         }
+    }
+}
 
-        item(key = "footer") {
+@Composable
+private fun EmptyState(
+    query: String,
+    watchlistOnly: Boolean,
+    provider: String?,
+    onClear: () -> Unit
+) {
+    Surface(
+        color = ArenaSurface,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, ArenaBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
             Text(
-                text = "Scores are a deterministic blend of curated arena benchmarks and live OpenRouter catalog data. Blended price weights input 75% / output 25%.",
-                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                color = ArenaTextMuted,
-                modifier = Modifier.padding(top = 8.dp)
+                text = when {
+                    watchlistOnly -> "Your watchlist is empty"
+                    query.isNotBlank() -> "No models match \"$query\""
+                    provider != null -> "No $provider models match these filters"
+                    else -> "No models match these filters"
+                },
+                style = MaterialTheme.typography.titleMedium,
+                color = ArenaTextPrimary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = if (watchlistOnly) {
+                    "Tap the star on any model to pin it here for quick access."
+                } else {
+                    "Try a shorter search term, a different category, or clear the active filters."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = ArenaTextSecondary
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "Clear filters",
+                style = MaterialTheme.typography.labelLarge,
+                color = ArenaCyan,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onClear)
+                    .padding(horizontal = 4.dp, vertical = 6.dp)
             )
         }
     }
@@ -253,6 +423,9 @@ private fun LiveStatusHeader(
             )
         }.getOrDefault("--:--")
     }
+    val relative = remember(lastUpdated) {
+        LeaderboardUseCases.relativeTime(lastUpdated)
+    }
 
     Surface(
         color = ArenaSurface,
@@ -282,7 +455,7 @@ private fun LiveStatusHeader(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "LIVE SYNC",
-                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = ArenaEmerald,
                     fontWeight = FontWeight.Bold
                 )
@@ -294,7 +467,7 @@ private fun LiveStatusHeader(
                         modifier = Modifier.size(18.dp)
                     )
                 } else {
-                    IconButton(onClick = onRefresh, modifier = Modifier.size(28.dp)) {
+                    IconButton(onClick = onRefresh, modifier = Modifier.size(32.dp)) {
                         Icon(
                             imageVector = Icons.Filled.Refresh,
                             contentDescription = "Refresh leaderboard",
@@ -311,24 +484,24 @@ private fun LiveStatusHeader(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = modelCount.toString(),
-                        style = androidx.compose.material3.MaterialTheme.typography.headlineMedium,
+                        style = MaterialTheme.typography.headlineMedium,
                         color = ArenaTextPrimary
                     )
                     Text(
                         text = "MODELS TRACKED",
-                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = ArenaTextMuted
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
                         text = syncTime,
-                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium,
                         color = ArenaTextPrimary
                     )
                     Text(
-                        text = "LAST SYNC - ${sourceLabel.uppercase(Locale.US)}",
-                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                        text = "$relative \u00B7 ${sourceLabel.uppercase(Locale.US)}",
+                        style = MaterialTheme.typography.labelSmall,
                         color = ArenaTextMuted
                     )
                 }
@@ -372,7 +545,7 @@ private fun PodiumCard(
     Card(
         modifier = Modifier
             .width(268.dp)
-            .clickable(onClick = onClick),
+            .clickable(onClickLabel = "Open ${model.name}", onClick = onClick),
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = ArenaSurface),
         border = BorderStroke(
@@ -404,7 +577,7 @@ private fun PodiumCard(
                 ) {
                     Text(
                         text = "#$rank",
-                        style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                        style = MaterialTheme.typography.labelLarge,
                         color = medalColor,
                         fontWeight = FontWeight.Bold
                     )
@@ -412,13 +585,13 @@ private fun PodiumCard(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "PODIUM",
-                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = medalColor
                 )
                 Spacer(modifier = Modifier.weight(1f))
                 Text(
                     text = tierLabel(model.tier),
-                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = scoreColor(model.overallScore)
                 )
             }
@@ -427,14 +600,14 @@ private fun PodiumCard(
 
             Text(
                 text = model.name,
-                style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleLarge,
                 color = ArenaTextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = model.provider,
-                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = ArenaTextSecondary
             )
 
@@ -443,14 +616,14 @@ private fun PodiumCard(
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     text = String.format(Locale.US, "%.1f", model.overallScore),
-                    style = androidx.compose.material3.MaterialTheme.typography.displaySmall,
+                    style = MaterialTheme.typography.displaySmall,
                     color = scoreColor(model.overallScore),
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "ARENA",
-                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = ArenaTextMuted,
                     modifier = Modifier.padding(bottom = 6.dp)
                 )
@@ -482,13 +655,13 @@ private fun MetricPill(label: String, value: String) {
         Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
             Text(
                 text = label,
-                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall,
                 color = ArenaTextMuted,
-                fontSize = 8.sp
+                fontSize = 9.sp
             )
             Text(
                 text = value,
-                style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelLarge,
                 color = ArenaTextPrimary,
                 fontSize = 11.sp
             )
@@ -499,16 +672,41 @@ private fun MetricPill(label: String, value: String) {
 @Composable
 private fun FilterBar(
     selected: RankingCategory,
-    onSelect: (RankingCategory) -> Unit
+    onSelect: (RankingCategory) -> Unit,
+    watchlistOnly: Boolean,
+    watchedCount: Int,
+    onToggleWatchlist: () -> Unit
 ) {
     Column {
         Text(
             text = "CATEGORY",
-            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall,
             color = ArenaTextMuted
         )
         Spacer(modifier = Modifier.height(6.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            item(key = "watchlist") {
+                FilterChip(
+                    selected = watchlistOnly,
+                    onClick = onToggleWatchlist,
+                    label = { Text(if (watchedCount > 0) "Watchlist $watchedCount" else "Watchlist") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (watchlistOnly) Icons.Filled.Star else Icons.Filled.StarBorder,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = ArenaSurface,
+                        labelColor = ArenaTextSecondary,
+                        iconColor = ArenaTextMuted,
+                        selectedContainerColor = ArenaGold.copy(alpha = 0.16f),
+                        selectedLabelColor = ArenaGold,
+                        selectedLeadingIconColor = ArenaGold
+                    )
+                )
+            }
             items(RankingCategory.entries) { category ->
                 val isSelected = category == selected
                 FilterChip(
@@ -535,7 +733,7 @@ private fun SortBar(
     Column {
         Text(
             text = "SORT BY",
-            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall,
             color = ArenaTextMuted
         )
         Spacer(modifier = Modifier.height(6.dp))
@@ -556,25 +754,58 @@ private fun SortBar(
 }
 
 @Composable
+private fun ProviderBar(
+    providers: List<String>,
+    selected: String?,
+    onSelect: (String) -> Unit
+) {
+    Column {
+        Text(
+            text = "PROVIDER",
+            style = MaterialTheme.typography.labelSmall,
+            color = ArenaTextMuted
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(providers) { provider ->
+                val isSelected = provider == selected
+                AssistChip(
+                    onClick = { onSelect(provider) },
+                    label = { Text(provider, maxLines = 1) },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = if (isSelected) ArenaEmerald.copy(alpha = 0.16f) else ArenaSurface,
+                        labelColor = if (isSelected) ArenaEmerald else ArenaTextSecondary
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ModelRow(
     rank: Int,
     model: AiModel,
+    isWatched: Boolean,
+    isNew: Boolean,
     onClick: () -> Unit,
+    onToggleWatch: () -> Unit,
+    onCompare: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .clickable(onClickLabel = "Open ${model.name}", onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = ArenaSurface),
-        border = BorderStroke(1.dp, ArenaBorder)
+        border = BorderStroke(1.dp, if (isWatched) ArenaGold.copy(alpha = 0.35f) else ArenaBorder)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(start = 14.dp, end = 8.dp, top = 14.dp, bottom = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = rank.toString().padStart(2, '0'),
-                    style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelLarge,
                     color = ArenaTextMuted,
                     modifier = Modifier.width(26.dp)
                 )
@@ -582,20 +813,24 @@ private fun ModelRow(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = model.name,
-                            style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleMedium,
                             color = ArenaTextPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
                         )
+                        if (isNew) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            TinyTag(text = "NEW", color = ArenaCyan)
+                        }
                         if (model.isOpenWeight) {
                             Spacer(modifier = Modifier.width(6.dp))
                             TinyTag(text = "OPEN", color = ArenaEmerald)
                         }
                     }
                     Text(
-                        text = "${model.provider} - ${model.contextLabel} context",
-                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                        text = "${model.provider} \u00B7 ${model.contextLabel} context",
+                        style = MaterialTheme.typography.bodySmall,
                         color = ArenaTextMuted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -605,41 +840,72 @@ private fun ModelRow(
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
                         text = String.format(Locale.US, "%.1f", model.overallScore),
-                        style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleLarge,
                         color = scoreColor(model.overallScore),
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = tierLabel(model.tier),
-                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = ArenaTextMuted,
-                        fontSize = 8.sp
+                        fontSize = 9.sp
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
-            ScoreBar(score = model.overallScore, color = scoreColor(model.overallScore))
-            Spacer(modifier = Modifier.height(10.dp))
+            ScoreBar(
+                score = model.overallScore,
+                color = scoreColor(model.overallScore),
+                modifier = Modifier.padding(end = 6.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = LeaderboardUseCases.formatPrice(model.blendedPricePerMillion) + " /1M",
-                    style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelLarge,
                     color = ArenaTextSecondary
                 )
+                model.priceChangePercent?.let { percent ->
+                    Spacer(modifier = Modifier.width(6.dp))
+                    TinyTag(
+                        text = LeaderboardUseCases.formatPriceChange(percent),
+                        color = if (percent < 0) ArenaEmerald else ArenaDanger
+                    )
+                }
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
                     text = "${String.format(Locale.US, "%.0f", model.speedTokensPerSec)} tok/s",
-                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodySmall,
                     color = ArenaTextMuted
                 )
                 Spacer(modifier = Modifier.weight(1f))
                 Text(
                     text = "VALUE " + String.format(Locale.US, "%.1f", model.valueScore),
-                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = ArenaPurple
                 )
+                IconButton(onClick = onToggleWatch, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        imageVector = if (isWatched) Icons.Filled.Star else Icons.Filled.StarBorder,
+                        contentDescription = if (isWatched) {
+                            "Remove ${model.name} from watchlist"
+                        } else {
+                            "Add ${model.name} to watchlist"
+                        },
+                        tint = if (isWatched) ArenaGold else ArenaTextMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                IconButton(onClick = onCompare, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        imageVector = Icons.Filled.CompareArrows,
+                        contentDescription = "Compare ${model.name} head-to-head",
+                        tint = ArenaTextMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }
@@ -653,9 +919,9 @@ private fun TinyTag(text: String, color: Color) {
     ) {
         Text(
             text = text,
-            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall,
             color = color,
-            fontSize = 8.sp,
+            fontSize = 9.sp,
             modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
         )
     }
@@ -678,6 +944,7 @@ fun ScoreBar(
             .height(6.dp)
             .clip(RoundedCornerShape(3.dp))
             .background(ArenaBorder)
+            .semantics { contentDescription = "Arena score ${String.format(Locale.US, "%.1f", score)} out of 100" }
     ) {
         Box(
             modifier = Modifier

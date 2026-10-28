@@ -15,6 +15,7 @@ import com.arenapulse.android.domain.SortMode
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -315,6 +316,212 @@ class LeaderboardLogicTest {
         assertEquals(0.28, model.inputPricePerMillion, 0.0000001)
         assertEquals(91.8, model.overallScore, 0.0001)
         assertTrue(model.supportsReasoning)
+    }
+
+    @Test
+    fun search_matchesNameProviderAndSlugWithAllTerms() {
+        val claude = AiModel(
+            id = "anthropic/claude-fable-5.1",
+            name = "Claude Fable 5.1",
+            provider = "Anthropic"
+        )
+        val gpt = AiModel(
+            id = "openai/gpt-6.1-sol",
+            name = "GPT-6.1 Sol",
+            provider = "OpenAI"
+        )
+        val deepseek = AiModel(
+            id = "deepseek/deepseek-v4.1-flash",
+            name = "DeepSeek V4.1 Flash",
+            provider = "DeepSeek"
+        )
+        val all = listOf(claude, gpt, deepseek)
+
+        assertEquals(1, LeaderboardUseCases.search(all, "fable").size)
+        assertEquals(1, LeaderboardUseCases.search(all, "anthropic").size)
+        assertEquals(1, LeaderboardUseCases.search(all, "v4.1").size)
+        assertEquals(3, LeaderboardUseCases.search(all, "   ").size)
+        assertEquals(0, LeaderboardUseCases.search(all, "gemini").size)
+
+        // Every whitespace-separated term must match.
+        assertEquals(1, LeaderboardUseCases.search(all, "deepseek flash").size)
+        assertEquals(0, LeaderboardUseCases.search(all, "deepseek sol").size)
+    }
+
+    @Test
+    fun providers_areOrderedByModelCountThenName() {
+        val models = listOf(
+            AiModel("a/1", "A1", "Alpha"),
+            AiModel("a/2", "A2", "Alpha"),
+            AiModel("b/1", "B1", "Beta"),
+            AiModel("c/1", "C1", "Gamma")
+        )
+
+        assertEquals(listOf("Alpha", "Beta", "Gamma"), LeaderboardUseCases.providers(models))
+    }
+
+    @Test
+    fun newestSort_ordersByCreationTimestamp() {
+        val old = model("old", 1.0, 80.0).copy(created = 100L)
+        val mid = model("mid", 1.0, 80.0).copy(created = 200L)
+        val fresh = model("fresh", 1.0, 80.0).copy(created = 300L)
+
+        assertEquals(
+            listOf("fresh", "mid", "old"),
+            LeaderboardUseCases.sort(listOf(old, fresh, mid), SortMode.NEWEST).map { it.id }
+        )
+    }
+
+    @Test
+    fun newArrivalWindow_respectsCreatedTimestamp() {
+        val now = 2_000_000_000L
+        val recent = AiModel("recent", "Recent", "Test", created = now - 86_400L)
+        val stale = AiModel("stale", "Stale", "Test", created = now - 120L * 86_400L)
+        val unknown = AiModel("unknown", "Unknown", "Test", created = 0L)
+
+        assertTrue(LeaderboardUseCases.isNewArrival(recent, now))
+        assertFalse(LeaderboardUseCases.isNewArrival(stale, now))
+        assertFalse(LeaderboardUseCases.isNewArrival(unknown, now))
+    }
+
+    @Test
+    fun priceChangePercent_detectsDropsAndIgnoresNoise() {
+        val dropped = AiModel(
+            id = "drop",
+            name = "Drop",
+            provider = "Test",
+            inputPricePerMillion = 0.5,
+            outputPricePerMillion = 2.0,
+            previousInputPricePerMillion = 1.0,
+            previousOutputPricePerMillion = 4.0
+        )
+        assertEquals(-50.0, dropped.priceChangePercent ?: 0.0, 0.0001)
+        assertTrue(dropped.hasPriceChange)
+
+        val stable = AiModel(
+            id = "stable",
+            name = "Stable",
+            provider = "Test",
+            inputPricePerMillion = 1.0,
+            outputPricePerMillion = 2.0,
+            previousInputPricePerMillion = 1.0,
+            previousOutputPricePerMillion = 2.0
+        )
+        assertNull(stable.priceChangePercent)
+        assertFalse(stable.hasPriceChange)
+
+        val firstSeen = AiModel(
+            id = "first",
+            name = "First",
+            provider = "Test",
+            inputPricePerMillion = 1.0
+        )
+        assertNull(firstSeen.priceChangePercent)
+    }
+
+    @Test
+    fun biggestPriceDrops_returnsSteepestDropsFirst() {
+        fun priced(id: String, current: Double, previous: Double) = AiModel(
+            id = id,
+            name = id,
+            provider = "Test",
+            inputPricePerMillion = current,
+            outputPricePerMillion = current,
+            previousInputPricePerMillion = previous,
+            previousOutputPricePerMillion = previous
+        )
+
+        val models = listOf(
+            priced("flat", 1.0, 1.0),
+            priced("small", 0.95, 1.0),
+            priced("big", 0.5, 1.0)
+        )
+
+        assertEquals(
+            listOf("big", "small"),
+            LeaderboardUseCases.biggestPriceDrops(models).map { it.id }
+        )
+    }
+
+    @Test
+    fun relativeTime_formatsFreshnessBuckets() {
+        val now = 1_000_000_000L
+
+        assertEquals("just now", LeaderboardUseCases.relativeTime(now - 10_000L, now))
+        assertEquals("5m ago", LeaderboardUseCases.relativeTime(now - 5 * 60_000L, now))
+        assertEquals("3h ago", LeaderboardUseCases.relativeTime(now - 3 * 3_600_000L, now))
+        assertEquals("2d ago", LeaderboardUseCases.relativeTime(now - 2 * 86_400_000L, now))
+        assertEquals("never", LeaderboardUseCases.relativeTime(0L, now))
+    }
+
+    @Test
+    fun refine_combinesSearchProviderWatchlistAndCategory() {
+        val open = AiModel(
+            id = "open/cheap",
+            name = "Cheap Open",
+            provider = "OpenCo",
+            inputPricePerMillion = 0.2,
+            outputPricePerMillion = 0.4,
+            overallScore = 90.0,
+            codingScore = 90.0,
+            reasoningScore = 90.0,
+            agenticScore = 90.0,
+            isOpenWeight = true
+        )
+        val closed = AiModel(
+            id = "closed/premium",
+            name = "Premium Closed",
+            provider = "ClosedCo",
+            inputPricePerMillion = 10.0,
+            outputPricePerMillion = 30.0,
+            overallScore = 95.0,
+            codingScore = 96.0,
+            reasoningScore = 96.0,
+            agenticScore = 96.0
+        )
+        val models = listOf(open, closed)
+
+        val result = LeaderboardUseCases.refine(
+            models = models,
+            query = "open",
+            category = RankingCategory.OPEN_WEIGHT,
+            mode = SortMode.OVERALL,
+            provider = "OpenCo",
+            watchedIds = setOf("open/cheap"),
+            watchlistOnly = true
+        )
+
+        assertEquals(listOf("open/cheap"), result.map { it.id })
+    }
+
+    @Test
+    fun repository_preservesPreviousPricesForDeltaDetection() = runBlocking {
+        val directory = Files.createTempDirectory("arenapulse-delta").toFile()
+        val cacheFile = File(directory, "leaderboard_cache.json")
+
+        fun dto(input: String, output: String) = ModelDto(
+            id = "acme/model-x",
+            name = "Model X",
+            contextLength = 100_000,
+            pricing = PricingDto(prompt = input, completion = output)
+        )
+
+        val first = LeaderboardRepository(
+            cacheFile = cacheFile,
+            catalogSource = FakeCatalogSource { listOf(dto("0.000002", "0.000008")) }
+        )
+        first.load(forceRefresh = true)
+
+        val second = LeaderboardRepository(
+            cacheFile = cacheFile,
+            catalogSource = FakeCatalogSource { listOf(dto("0.000001", "0.000004")) }
+        )
+        val snapshot = second.load(forceRefresh = true)
+        val model = snapshot.models.single()
+
+        assertEquals(1.0, model.inputPricePerMillion, 0.0001)
+        assertEquals(2.0, model.previousInputPricePerMillion ?: 0.0, 0.0001)
+        assertEquals(-50.0, model.priceChangePercent ?: 0.0, 0.0001)
     }
 
     private class FakeCatalogSource(

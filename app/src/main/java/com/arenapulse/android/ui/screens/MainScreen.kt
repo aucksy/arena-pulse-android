@@ -17,11 +17,13 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -45,6 +47,27 @@ fun MainScreen(viewModel: LeaderboardViewModel) {
 
     var selectedTab by rememberSaveable { mutableStateOf(ArenaTab.RANKINGS) }
     var selectedModelId by rememberSaveable { mutableStateOf<String?>(null) }
+    var versusLeftId by rememberSaveable { mutableStateOf<String?>(null) }
+    var versusRightId by rememberSaveable { mutableStateOf<String?>(null) }
+    var showAbout by rememberSaveable { mutableStateOf(false) }
+
+    // Keeps per-tab rememberSaveable state (filters, search, scroll position) alive
+    // across bottom-navigation switches.
+    val tabStateHolder = rememberSaveableStateHolder()
+
+    LaunchedEffect(state.models) {
+        if (state.models.isEmpty()) return@LaunchedEffect
+        val ranked = state.models.sortedByDescending { it.overallScore }
+        if (versusLeftId == null || ranked.none { it.id == versusLeftId }) {
+            versusLeftId = ranked.first().id
+        }
+        if (versusRightId == null ||
+            ranked.none { it.id == versusRightId } ||
+            versusRightId == versusLeftId
+        ) {
+            versusRightId = ranked.firstOrNull { it.id != versusLeftId }?.id
+        }
+    }
 
     val selectedModel = remember(state.models, selectedModelId) {
         state.models.firstOrNull { it.id == selectedModelId }
@@ -99,32 +122,56 @@ fun MainScreen(viewModel: LeaderboardViewModel) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) { tab ->
-            when (tab) {
-                ArenaTab.RANKINGS -> RankingsScreen(
-                    models = state.models,
-                    isLoading = state.isLoading,
-                    isRefreshing = state.isRefreshing,
-                    lastUpdated = state.lastUpdated,
-                    sourceLabel = state.sourceLabel,
-                    errorMessage = state.errorMessage,
-                    onRefresh = { viewModel.refresh() },
-                    onModelClick = { selectedModelId = it.id }
-                )
+            tabStateHolder.SaveableStateProvider(tab.name) {
+                when (tab) {
+                    ArenaTab.RANKINGS -> RankingsScreen(
+                        models = state.models,
+                        isLoading = state.isLoading,
+                        isRefreshing = state.isRefreshing,
+                        lastUpdated = state.lastUpdated,
+                        sourceLabel = state.sourceLabel,
+                        errorMessage = state.errorMessage,
+                        watchedIds = state.watchedIds,
+                        onRefresh = { viewModel.refresh() },
+                        onModelClick = { selectedModelId = it.id },
+                        onToggleWatch = { viewModel.toggleWatch(it.id) },
+                        onCompare = { model ->
+                            versusLeftId = model.id
+                            versusRightId = state.models
+                                .sortedByDescending { it.overallScore }
+                                .firstOrNull { it.id != model.id }
+                                ?.id
+                            selectedTab = ArenaTab.VERSUS
+                        },
+                        onOpenAbout = { showAbout = true }
+                    )
 
-                ArenaTab.VERSUS -> VersusScreen(
-                    models = state.models,
-                    onInspect = { selectedModelId = it.id }
-                )
+                    ArenaTab.VERSUS -> VersusScreen(
+                        models = state.models,
+                        leftId = versusLeftId,
+                        rightId = versusRightId,
+                        onSelectLeft = { versusLeftId = it },
+                        onSelectRight = { versusRightId = it },
+                        onSwap = {
+                            val previousLeft = versusLeftId
+                            versusLeftId = versusRightId
+                            versusRightId = previousLeft
+                        },
+                        onInspect = { selectedModelId = it.id }
+                    )
 
-                ArenaTab.MATRIX -> FrontierChartScreen(
-                    models = state.models,
-                    onInspect = { selectedModelId = it.id }
-                )
+                    ArenaTab.MATRIX -> FrontierChartScreen(
+                        models = state.models,
+                        watchedIds = state.watchedIds,
+                        onInspect = { selectedModelId = it.id }
+                    )
 
-                ArenaTab.SIGNALS -> InsightsScreen(
-                    models = state.models,
-                    onInspect = { selectedModelId = it.id }
-                )
+                    ArenaTab.SIGNALS -> InsightsScreen(
+                        models = state.models,
+                        watchedIds = state.watchedIds,
+                        onInspect = { selectedModelId = it.id }
+                    )
+                }
             }
         }
     }
@@ -133,7 +180,23 @@ fun MainScreen(viewModel: LeaderboardViewModel) {
         ModelDetailSheet(
             model = selectedModel,
             rank = selectedRank,
+            totalModels = state.models.size,
+            isWatched = selectedModel.id in state.watchedIds,
+            onToggleWatch = { viewModel.toggleWatch(selectedModel.id) },
             onDismiss = { selectedModelId = null }
+        )
+    }
+
+    if (showAbout) {
+        AboutSheet(
+            modelCount = state.models.size,
+            watchedCount = state.watchedIds.size,
+            lastUpdated = state.lastUpdated,
+            sourceLabel = state.sourceLabel,
+            isStale = state.isStale,
+            onClearCache = { viewModel.clearCacheAndResync() },
+            onClearWatchlist = { viewModel.clearWatchlist() },
+            onDismiss = { showAbout = false }
         )
     }
 }

@@ -9,7 +9,7 @@ import java.io.File
 
 @Serializable
 data class CachedLeaderboard(
-    val version: Int = 1,
+    val version: Int = 2,
     val savedAt: Long = 0L,
     val models: List<AiModel> = emptyList()
 )
@@ -28,6 +28,9 @@ data class LeaderboardSnapshot(
  * 1. Fresh OpenRouter catalog merged with the benchmark registry.
  * 2. Last successful JSON cache in `filesDir/leaderboard_cache.json`.
  * 3. The built-in registry seed (24 frontier models).
+ *
+ * Price history is preserved across syncs: the previous cache entry for a model
+ * is attached to the merged record so the UI can show price moves.
  *
  * No Room, no KSP, no KAPT: a single JSON document is all the persistence we need.
  */
@@ -49,9 +52,11 @@ class LeaderboardRepository(
             }
         }
 
+        val previousModels = readCache()?.models?.associateBy { it.id }.orEmpty()
+
         val liveModels = runCatching { catalogSource.fetchModels() }
             .getOrNull()
-            ?.let { merge(it) }
+            ?.let { merge(it, previousModels) }
             .orEmpty()
 
         if (liveModels.isNotEmpty()) {
@@ -81,14 +86,30 @@ class LeaderboardRepository(
         )
     }
 
-    /** Merge live catalog fields with deterministic benchmark profiles. */
-    fun merge(dtos: List<ModelDto>): List<AiModel> = dtos
+    /**
+     * Merge live catalog fields with deterministic benchmark profiles.
+     * [previous] supplies the prior sync's prices for delta detection.
+     */
+    fun merge(
+        dtos: List<ModelDto>,
+        previous: Map<String, AiModel> = emptyMap()
+    ): List<AiModel> = dtos
         .asSequence()
         .filter { it.id.isNotBlank() }
         .distinctBy { it.id }
-        .map { it.toAiModel() }
+        .map { dto -> dto.toAiModel(previous = previous[dto.id]) }
         .sortedWith(compareByDescending<AiModel> { it.overallScore }.thenBy { it.name })
         .toList()
+
+    /** Timestamp of the on-disk cache, or null when nothing is cached. */
+    fun cacheSavedAt(): Long? = readCache()?.savedAt
+
+    /** Number of models currently persisted, or 0. */
+    fun cachedModelCount(): Int = readCache()?.models?.size ?: 0
+
+    fun clearCache(): Boolean = runCatching {
+        if (cacheFile.exists()) cacheFile.delete() else true
+    }.getOrDefault(false)
 
     private fun readCache(): CachedLeaderboard? {
         if (!cacheFile.exists()) return null

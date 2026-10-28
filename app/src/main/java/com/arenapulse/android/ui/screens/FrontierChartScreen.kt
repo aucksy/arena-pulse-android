@@ -43,6 +43,7 @@ import com.arenapulse.android.ui.components.FrontierScatterCanvas
 import com.arenapulse.android.ui.theme.ArenaBorder
 import com.arenapulse.android.ui.theme.ArenaCyan
 import com.arenapulse.android.ui.theme.ArenaEmerald
+import com.arenapulse.android.ui.theme.ArenaGold
 import com.arenapulse.android.ui.theme.ArenaPurple
 import com.arenapulse.android.ui.theme.ArenaSurface
 import com.arenapulse.android.ui.theme.ArenaTextMuted
@@ -54,10 +55,17 @@ import java.util.Locale
 @Composable
 fun FrontierChartScreen(
     models: List<AiModel>,
+    watchedIds: Set<String>,
     onInspect: (AiModel) -> Unit
 ) {
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var showAll by rememberSaveable { mutableStateOf(false) }
     val selected = models.firstOrNull { it.id == selectedId }
+    // A live OpenRouter catalog can exceed 300 models; plotting all of them is noise.
+    val plotModels = remember(models, showAll) {
+        val ranked = models.sortedByDescending { it.overallScore }
+        if (showAll) ranked else ranked.take(40)
+    }
     val frontier = remember(models) { LeaderboardUseCases.paretoFrontier(models) }
     val openWeightCount = remember(models) { models.count { it.isOpenWeight } }
 
@@ -104,6 +112,22 @@ fun FrontierChartScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "PLOTTING ${plotModels.size} OF ${models.size}",
+                style = MaterialTheme.typography.labelSmall,
+                color = ArenaTextMuted
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            TextButton(onClick = { showAll = !showAll }) {
+                Text(
+                    text = if (showAll) "Top 40 only" else "Show all",
+                    color = ArenaCyan,
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        }
+
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = ArenaSurface),
@@ -112,7 +136,7 @@ fun FrontierChartScreen(
         ) {
             Column(modifier = Modifier.padding(10.dp)) {
                 FrontierScatterCanvas(
-                    models = models,
+                    models = plotModels,
                     selectedId = selectedId,
                     onSelect = { picked -> selectedId = picked?.id },
                     modifier = Modifier
@@ -173,6 +197,21 @@ fun FrontierChartScreen(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = ArenaCyan,
                                     fontSize = 8.sp,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                        if (selected.id in watchedIds) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                color = ArenaGold.copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = "WATCHED",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = ArenaGold,
+                                    fontSize = 9.sp,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                 )
                             }

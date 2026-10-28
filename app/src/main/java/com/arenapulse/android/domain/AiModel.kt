@@ -1,11 +1,16 @@
 package com.arenapulse.android.domain
 
 import kotlinx.serialization.Serializable
+import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 
 /**
  * A normalized leaderboard entry. Live catalog data (pricing, context, modality)
  * is merged with deterministic benchmark scores before it reaches the UI.
+ *
+ * [previousInputPricePerMillion] / [previousOutputPricePerMillion] are populated
+ * from the prior cache entry so the UI can surface price moves between syncs.
  */
 @Serializable
 data class AiModel(
@@ -25,7 +30,9 @@ data class AiModel(
     val reasoningScore: Double = 0.0,
     val agenticScore: Double = 0.0,
     val speedTokensPerSec: Double = 0.0,
-    val isOpenWeight: Boolean = false
+    val isOpenWeight: Boolean = false,
+    val previousInputPricePerMillion: Double? = null,
+    val previousOutputPricePerMillion: Double? = null
 ) {
     /** 3:1 input-to-output blend used for value and Pareto comparisons. */
     val blendedPricePerMillion: Double
@@ -38,6 +45,30 @@ data class AiModel(
     val isUltraCheap: Boolean
         get() = blendedPricePerMillion < ULTRA_CHEAP_THRESHOLD
 
+    /** Zero-cost promotional or local models. */
+    val isFree: Boolean
+        get() = blendedPricePerMillion <= 0.0001
+
+    val supportsVision: Boolean
+        get() = modality.contains("image", ignoreCase = true)
+
+    /**
+     * Percentage change in blended price versus the previous sync.
+     * Null when there is no baseline or the move is under 0.5%.
+     */
+    val priceChangePercent: Double?
+        get() {
+            val previousInput = previousInputPricePerMillion ?: return null
+            val previousOutput = previousOutputPricePerMillion ?: return null
+            val previousBlended = previousInput * INPUT_WEIGHT + previousOutput * OUTPUT_WEIGHT
+            if (previousBlended <= 0.0001) return null
+            val percent = (blendedPricePerMillion - previousBlended) / previousBlended * 100.0
+            return if (abs(percent) < 0.5) null else percent
+        }
+
+    val hasPriceChange: Boolean
+        get() = priceChangePercent != null
+
     val tier: ScoreTier
         get() = when {
             overallScore >= 94.0 -> ScoreTier.ELITE
@@ -49,7 +80,8 @@ data class AiModel(
 
     val contextLabel: String
         get() = when {
-            contextLength >= 1_000_000 -> "${"%.1f".format(contextLength / 1_000_000.0)}M"
+            contextLength >= 1_000_000 ->
+                String.format(Locale.US, "%.1fM", contextLength / 1_000_000.0)
             contextLength >= 1_000 -> "${contextLength / 1_000}K"
             else -> contextLength.toString()
         }

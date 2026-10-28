@@ -50,9 +50,20 @@ import java.util.Locale
 @Composable
 fun InsightsScreen(
     models: List<AiModel>,
+    watchedIds: Set<String>,
     onInspect: (AiModel) -> Unit
 ) {
     val openWeightCount = remember(models) { models.count { it.isOpenWeight } }
+    val nowSeconds = remember { System.currentTimeMillis() / 1_000L }
+    val newArrivals = remember(models, nowSeconds) {
+        models.filter { LeaderboardUseCases.isNewArrival(it, nowSeconds) }
+            .sortedByDescending { it.created }
+            .take(5)
+    }
+    val priceDrops = remember(models) { LeaderboardUseCases.biggestPriceDrops(models, 3) }
+    val watchedModels = remember(models, watchedIds) {
+        models.filter { it.id in watchedIds }.sortedByDescending { it.overallScore }
+    }
     val openShare = remember(models, openWeightCount) {
         if (models.isEmpty()) 0 else (openWeightCount * 100.0 / models.size).toInt()
     }
@@ -219,6 +230,36 @@ fun InsightsScreen(
             }
         }
 
+        if (priceDrops.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(14.dp))
+            CompactModelSection(
+                title = "PRICE MOVES",
+                emptyText = "",
+                models = priceDrops,
+                accent = ArenaEmerald,
+                valueFor = { LeaderboardUseCases.formatPriceChange(it.priceChangePercent ?: 0.0) },
+                onInspect = onInspect
+            )
+        }
+
+        if (newArrivals.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(14.dp))
+            CompactModelSection(
+                title = "NEW ARRIVALS",
+                emptyText = "",
+                models = newArrivals,
+                accent = ArenaCyan,
+                valueFor = {
+                    if (it.created > 0L) {
+                        LeaderboardUseCases.relativeTime(it.created * 1_000L)
+                    } else {
+                        "new"
+                    }
+                },
+                onInspect = onInspect
+            )
+        }
+
         Spacer(modifier = Modifier.height(14.dp))
 
         Text(
@@ -274,6 +315,17 @@ fun InsightsScreen(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        CompactModelSection(
+            title = "YOUR WATCHLIST",
+            emptyText = "Star a model in Rankings to pin it here for quick access.",
+            models = watchedModels,
+            accent = ArenaGold,
+            valueFor = { String.format(Locale.US, "%.1f", it.overallScore) },
+            onInspect = onInspect
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -346,6 +398,65 @@ private fun SignalStat(
                 style = MaterialTheme.typography.titleLarge,
                 color = ArenaTextPrimary
             )
+        }
+    }
+}
+
+@Composable
+private fun CompactModelSection(
+    title: String,
+    emptyText: String,
+    models: List<AiModel>,
+    accent: Color,
+    valueFor: (AiModel) -> String,
+    onInspect: (AiModel) -> Unit
+) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelSmall,
+        color = ArenaTextMuted
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    Surface(
+        color = ArenaSurface,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, ArenaBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
+            if (models.isEmpty()) {
+                Text(
+                    text = emptyText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ArenaTextSecondary,
+                    modifier = Modifier.padding(vertical = 10.dp)
+                )
+            } else {
+                models.forEach { model ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onInspect(model) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = model.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = ArenaTextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = valueFor(model),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = accent,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
         }
     }
 }

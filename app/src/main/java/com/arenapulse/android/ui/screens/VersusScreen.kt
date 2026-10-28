@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,11 +21,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -34,7 +33,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,12 +43,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.arenapulse.android.domain.AiModel
 import com.arenapulse.android.domain.LeaderboardUseCases
+import com.arenapulse.android.ui.shareText
 import com.arenapulse.android.ui.theme.ArenaBorder
 import com.arenapulse.android.ui.theme.ArenaCyan
 import com.arenapulse.android.ui.theme.ArenaEmerald
@@ -73,25 +73,19 @@ private data class VersusMetric(
 @Composable
 fun VersusScreen(
     models: List<AiModel>,
+    leftId: String?,
+    rightId: String?,
+    onSelectLeft: (String) -> Unit,
+    onSelectRight: (String) -> Unit,
+    onSwap: () -> Unit,
     onInspect: (AiModel) -> Unit
 ) {
     val ranked = remember(models) { models.sortedByDescending { it.overallScore } }
-
-    var leftId by rememberSaveable { mutableStateOf<String?>(null) }
-    var rightId by rememberSaveable { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(ranked) {
-        if (ranked.isEmpty()) return@LaunchedEffect
-        if (leftId == null || ranked.none { it.id == leftId }) {
-            leftId = ranked.first().id
-        }
-        if (rightId == null || ranked.none { it.id == rightId } || rightId == leftId) {
-            rightId = (ranked.firstOrNull { it.id != leftId } ?: ranked.first()).id
-        }
-    }
-
     val left = ranked.firstOrNull { it.id == leftId } ?: ranked.firstOrNull()
     val right = ranked.firstOrNull { it.id == rightId } ?: ranked.getOrNull(1) ?: ranked.firstOrNull()
+
+    var pickerTarget by rememberSaveable { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -121,37 +115,28 @@ fun VersusScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Loading contenders...",
+                    text = "Loading contenders\u2026",
                     color = ArenaTextSecondary,
+                    style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(20.dp)
                 )
             }
-        } else {
+            return@Column
+        }
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ModelSelector(
                 label = "CONTENDER A",
                 selected = left,
-                models = ranked,
                 accent = ArenaCyan,
-                onSelect = { picked ->
-                    leftId = picked.id
-                    if (rightId == picked.id) {
-                        rightId = ranked.firstOrNull { it.id != picked.id }?.id
-                    }
-                },
+                onClick = { pickerTarget = "left" },
                 modifier = Modifier.weight(1f)
             )
             ModelSelector(
                 label = "CONTENDER B",
                 selected = right,
-                models = ranked,
                 accent = ArenaPurple,
-                onSelect = { picked ->
-                    rightId = picked.id
-                    if (leftId == picked.id) {
-                        leftId = ranked.firstOrNull { it.id != picked.id }?.id
-                    }
-                },
+                onClick = { pickerTarget = "right" },
                 modifier = Modifier.weight(1f)
             )
         }
@@ -159,11 +144,14 @@ fun VersusScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = {
-                val swap = leftId
-                leftId = rightId
-                rightId = swap
-            }) {
+            TextButton(onClick = onSwap) {
+                Icon(
+                    imageVector = Icons.Filled.SwapHoriz,
+                    contentDescription = null,
+                    tint = ArenaTextSecondary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
                 Text("Swap", color = ArenaTextSecondary, style = MaterialTheme.typography.labelLarge)
             }
             Spacer(modifier = Modifier.weight(1f))
@@ -357,11 +345,60 @@ fun VersusScreen(
                     color = ArenaTextPrimary
                 )
                 Text(
-                    text = "Metric wins: $leftWins - $rightWins. Cost efficiency favors the lower blended price per 1M tokens.",
+                    text = "Metric wins: $leftWins - $rightWins. Cost efficiency favors the lower blended " +
+                        "price per 1M tokens.",
                     style = MaterialTheme.typography.bodySmall,
                     color = ArenaTextSecondary,
                     modifier = Modifier.padding(top = 4.dp)
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+                TextButton(
+                    onClick = {
+                        val winner = when {
+                            leftWins > rightWins -> left.name
+                            rightWins > leftWins -> right.name
+                            else -> "Dead heat"
+                        }
+                        shareText(
+                            context = context,
+                            subject = "ArenaPulse: ${left.name} vs ${right.name}",
+                            body = buildString {
+                                appendLine("${left.name} vs ${right.name} \u2014 ArenaPulse")
+                                appendLine("Verdict: $winner ($leftWins-$rightWins)")
+                                appendLine(
+                                    "Coding ${formatScore(left.codingScore)} vs ${formatScore(right.codingScore)}"
+                                )
+                                appendLine(
+                                    "Reasoning ${formatScore(left.reasoningScore)} vs " +
+                                        formatScore(right.reasoningScore)
+                                )
+                                appendLine(
+                                    "Agentic ${formatScore(left.agenticScore)} vs " +
+                                        formatScore(right.agenticScore)
+                                )
+                                appendLine(
+                                    "Speed ${String.format(Locale.US, "%.0f", left.speedTokensPerSec)} vs " +
+                                        "${String.format(Locale.US, "%.0f", right.speedTokensPerSec)} tok/s"
+                                )
+                                appendLine(
+                                    "Blended price " +
+                                        LeaderboardUseCases.formatPrice(left.blendedPricePerMillion) + " vs " +
+                                        LeaderboardUseCases.formatPrice(right.blendedPricePerMillion) + " per 1M"
+                                )
+                            }
+                        )
+                    },
+                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Share,
+                        contentDescription = null,
+                        tint = ArenaCyan,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Share verdict", color = ArenaCyan, style = MaterialTheme.typography.labelLarge)
+                }
             }
         }
 
@@ -402,11 +439,43 @@ fun VersusScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
         Text(
-            text = "Value score = arena intelligence per blended dollar. Bars show each contender's share of the stronger metric.",
+            text = "Value score = arena intelligence per blended dollar. Bars show each contender's share " +
+                "of the stronger metric.",
             style = MaterialTheme.typography.bodySmall,
             color = ArenaTextMuted
         )
-        }
+    }
+
+    when (pickerTarget) {
+        "left" -> ModelPickerSheet(
+            title = "CONTENDER A",
+            models = ranked,
+            selectedId = left?.id,
+            accent = ArenaCyan,
+            onSelect = { picked ->
+                onSelectLeft(picked.id)
+                if (right?.id == picked.id) {
+                    ranked.firstOrNull { it.id != picked.id }?.let { onSelectRight(it.id) }
+                }
+                pickerTarget = null
+            },
+            onDismiss = { pickerTarget = null }
+        )
+
+        "right" -> ModelPickerSheet(
+            title = "CONTENDER B",
+            models = ranked,
+            selectedId = right?.id,
+            accent = ArenaPurple,
+            onSelect = { picked ->
+                onSelectRight(picked.id)
+                if (left?.id == picked.id) {
+                    ranked.firstOrNull { it.id != picked.id }?.let { onSelectLeft(it.id) }
+                }
+                pickerTarget = null
+            },
+            onDismiss = { pickerTarget = null }
+        )
     }
 }
 
@@ -414,77 +483,39 @@ fun VersusScreen(
 private fun ModelSelector(
     label: String,
     selected: AiModel?,
-    models: List<AiModel>,
     accent: Color,
-    onSelect: (AiModel) -> Unit,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Box(modifier = modifier) {
-        OutlinedButton(
-            onClick = { expanded = true },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = ArenaTextPrimary),
-            border = BorderStroke(1.dp, ArenaBorder),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = accent,
-                    fontSize = 8.sp
-                )
-                Text(
-                    text = selected?.name ?: "Select model",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = ArenaTextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Icon(
-                imageVector = Icons.Filled.KeyboardArrowDown,
-                contentDescription = "Open model list",
-                tint = ArenaTextMuted,
-                modifier = Modifier.size(18.dp)
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = ArenaTextPrimary),
+        border = BorderStroke(1.dp, ArenaBorder),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = accent,
+                fontSize = 9.sp
+            )
+            Text(
+                text = selected?.name ?: "Select model",
+                style = MaterialTheme.typography.titleMedium,
+                color = ArenaTextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
-
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier
-                .heightIn(max = 340.dp)
-                .background(ArenaSurface)
-        ) {
-            models.forEach { model ->
-                DropdownMenuItem(
-                    text = {
-                        Column {
-                            Text(
-                                text = model.name,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = ArenaTextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${model.provider} - ${formatScore(model.overallScore)} arena",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = ArenaTextMuted
-                            )
-                        }
-                    },
-                    onClick = {
-                        onSelect(model)
-                        expanded = false
-                    }
-                )
-            }
-        }
+        Icon(
+            imageVector = Icons.Filled.KeyboardArrowDown,
+            contentDescription = "Change ${label.lowercase(Locale.US)}",
+            tint = ArenaTextMuted,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 

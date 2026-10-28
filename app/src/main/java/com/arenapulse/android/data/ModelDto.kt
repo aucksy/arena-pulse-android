@@ -69,7 +69,8 @@ fun providerDisplayName(modelId: String): String = when (modelId.substringBefore
 }
 
 fun ModelDto.toAiModel(
-    profile: FrontierScoresRegistry.BenchmarkProfile = FrontierScoresRegistry.profileFor(id, name)
+    profile: FrontierScoresRegistry.BenchmarkProfile = FrontierScoresRegistry.profileFor(id, name),
+    previous: AiModel? = null
 ): AiModel {
     val params = supportedParameters.map { it.lowercase() }
     return AiModel(
@@ -89,6 +90,8 @@ fun ModelDto.toAiModel(
         reasoningScore = profile.reasoning,
         agenticScore = profile.agentic,
         speedTokensPerSec = profile.speed,
-        isOpenWeight = profile.openWeight
+        isOpenWeight = profile.openWeight,
+        previousInputPricePerMillion = previous?.inputPricePerMillion,
+        previousOutputPricePerMillion = previous?.outputPricePerMillion
     )
 }

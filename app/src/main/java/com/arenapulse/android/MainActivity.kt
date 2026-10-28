@@ -19,7 +19,7 @@ class MainActivity : ComponentActivity() {
 
         val viewModel = ViewModelProvider(
             this,
-            LeaderboardViewModel.factory(container.repository)
+            LeaderboardViewModel.factory(container.repository, container.preferences)
         )[LeaderboardViewModel::class.java]
 
         setContent {

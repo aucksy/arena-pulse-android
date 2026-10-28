@@ -1,9 +1,11 @@
 package com.arenapulse.android.ui.screens
 
+import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +22,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -42,6 +47,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,8 +57,10 @@ import androidx.compose.ui.unit.sp
 import com.arenapulse.android.domain.AiModel
 import com.arenapulse.android.domain.LeaderboardUseCases
 import com.arenapulse.android.ui.components.RadarChartCanvas
+import com.arenapulse.android.ui.shareText
 import com.arenapulse.android.ui.theme.ArenaBorder
 import com.arenapulse.android.ui.theme.ArenaCyan
+import com.arenapulse.android.ui.theme.ArenaDanger
 import com.arenapulse.android.ui.theme.ArenaEmerald
 import com.arenapulse.android.ui.theme.ArenaGold
 import com.arenapulse.android.ui.theme.ArenaPurple
@@ -66,9 +76,14 @@ import java.util.Locale
 fun ModelDetailSheet(
     model: AiModel,
     rank: Int,
+    totalModels: Int,
+    isWatched: Boolean,
+    onToggleWatch: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
 
     var dailyInputMillions by remember(model.id) { mutableStateOf(5f) }
     var dailyOutputMillions by remember(model.id) { mutableStateOf(1f) }
@@ -82,6 +97,22 @@ fun ModelDetailSheet(
         animationSpec = tween(durationMillis = 280),
         label = "monthly-cost"
     )
+
+    val shareBody = buildString {
+        appendLine("${model.name} \u2014 ${model.provider}")
+        appendLine("Arena score ${String.format(Locale.US, "%.1f", model.overallScore)} (rank #$rank of $totalModels)")
+        appendLine(
+            "Coding ${String.format(Locale.US, "%.1f", model.codingScore)} \u00B7 " +
+                "Reasoning ${String.format(Locale.US, "%.1f", model.reasoningScore)} \u00B7 " +
+                "Agentic ${String.format(Locale.US, "%.1f", model.agenticScore)}"
+        )
+        appendLine(
+            "Price ${LeaderboardUseCases.formatPrice(model.inputPricePerMillion)} in / " +
+                "${LeaderboardUseCases.formatPrice(model.outputPricePerMillion)} out per 1M \u00B7 " +
+                "${model.contextLabel} context"
+        )
+        append("Tracked in ArenaPulse")
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -100,7 +131,7 @@ fun ModelDetailSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "#$rank  ${model.provider.uppercase(Locale.US)}",
+                        text = "#$rank of $totalModels  \u00B7  ${model.provider.uppercase(Locale.US)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = ArenaTextMuted
                     )
@@ -112,12 +143,31 @@ fun ModelDetailSheet(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = model.id,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ArenaTextMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                }
+                IconButton(onClick = onToggleWatch) {
+                    Icon(
+                        imageVector = if (isWatched) Icons.Filled.Star else Icons.Filled.StarBorder,
+                        contentDescription = if (isWatched) {
+                            "Remove from watchlist"
+                        } else {
+                            "Add to watchlist"
+                        },
+                        tint = if (isWatched) ArenaGold else ArenaTextSecondary
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        shareText(
+                            context = context,
+                            subject = "ArenaPulse: ${model.name}",
+                            body = shareBody
+                        )
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Share,
+                        contentDescription = "Share ${model.name}",
+                        tint = ArenaTextSecondary
                     )
                 }
                 IconButton(onClick = onDismiss) {
@@ -127,6 +177,32 @@ fun ModelDetailSheet(
                         tint = ArenaTextSecondary
                     )
                 }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clickable {
+                        clipboard.setText(AnnotatedString(model.id))
+                        Toast.makeText(context, "Model ID copied", Toast.LENGTH_SHORT).show()
+                    }
+                    .padding(vertical = 4.dp)
+            ) {
+                Text(
+                    text = model.id,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ArenaTextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "COPY",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ArenaCyan,
+                    fontSize = 9.sp
+                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -139,6 +215,32 @@ fun ModelDetailSheet(
                 if (model.supportsReasoning) Badge("REASONING", ArenaCyan)
                 if (model.supportsTools) Badge("TOOLS", ArenaGold)
                 if (model.supportsStructuredOutputs) Badge("JSON", ArenaTextSecondary)
+                if (model.supportsVision) Badge("VISION", ArenaCyan)
+            }
+
+            if (model.hasPriceChange) {
+                Spacer(modifier = Modifier.height(10.dp))
+                val percent = model.priceChangePercent ?: 0.0
+                Surface(
+                    color = if (percent < 0) ArenaEmerald.copy(alpha = 0.10f) else ArenaDanger.copy(alpha = 0.10f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        if (percent < 0) ArenaEmerald.copy(alpha = 0.35f) else ArenaDanger.copy(alpha = 0.35f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = if (percent < 0) {
+                            "Price dropped ${LeaderboardUseCases.formatPriceChange(percent)} since the last sync"
+                        } else {
+                            "Price rose ${LeaderboardUseCases.formatPriceChange(percent)} since the last sync"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (percent < 0) ArenaEmerald else ArenaDanger,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -225,20 +327,17 @@ fun ModelDetailSheet(
                 border = BorderStroke(1.dp, ArenaCyan.copy(alpha = 0.25f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                     Text(
                         text = "UNIT ECONOMICS",
                         style = MaterialTheme.typography.labelSmall,
                         color = ArenaCyan
                     )
-                    Spacer(modifier = Modifier.weight(1f))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "IN " + LeaderboardUseCases.formatPrice(model.inputPricePerMillion) +
-                            "  /  OUT " + LeaderboardUseCases.formatPrice(model.outputPricePerMillion) +
-                            "  /  BLEND " + LeaderboardUseCases.formatPrice(model.blendedPricePerMillion),
+                            "   OUT " + LeaderboardUseCases.formatPrice(model.outputPricePerMillion) +
+                            "   BLEND " + LeaderboardUseCases.formatPrice(model.blendedPricePerMillion),
                         style = MaterialTheme.typography.bodySmall,
                         color = ArenaTextPrimary
                     )
@@ -258,6 +357,35 @@ fun ModelDetailSheet(
                 color = ArenaTextSecondary,
                 modifier = Modifier.padding(top = 2.dp)
             )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PresetChip(
+                    label = "Light",
+                    selected = dailyInputMillions == 0.5f && dailyOutputMillions == 0.1f,
+                    onClick = {
+                        dailyInputMillions = 0.5f
+                        dailyOutputMillions = 0.1f
+                    }
+                )
+                PresetChip(
+                    label = "Standard",
+                    selected = dailyInputMillions == 5f && dailyOutputMillions == 1f,
+                    onClick = {
+                        dailyInputMillions = 5f
+                        dailyOutputMillions = 1f
+                    }
+                )
+                PresetChip(
+                    label = "Heavy",
+                    selected = dailyInputMillions == 25f && dailyOutputMillions == 5f,
+                    onClick = {
+                        dailyInputMillions = 25f
+                        dailyOutputMillions = 5f
+                    }
+                )
+            }
 
             Spacer(modifier = Modifier.height(14.dp))
 
@@ -302,10 +430,7 @@ fun ModelDetailSheet(
 
             Text(
                 text = "Value score " + String.format(Locale.US, "%.1f", model.valueScore) +
-                    " arena points per blended dollar. Inputs: $" +
-                    String.format(Locale.US, "%.2f", model.inputPricePerMillion) +
-                    "/1M, outputs: $" + String.format(Locale.US, "%.2f", model.outputPricePerMillion) +
-                    "/1M. Monthly projection assumes 30 days.",
+                    " arena points per blended dollar. Monthly projection assumes 30 days.",
                 style = MaterialTheme.typography.bodySmall,
                 color = ArenaTextMuted
             )
@@ -320,6 +445,23 @@ fun ModelDetailSheet(
 }
 
 @Composable
+private fun PresetChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        color = if (selected) ArenaCyan.copy(alpha = 0.16f) else ArenaSurface,
+        shape = RoundedCornerShape(9.dp),
+        border = BorderStroke(1.dp, if (selected) ArenaCyan.copy(alpha = 0.5f) else ArenaBorder),
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (selected) ArenaCyan else ArenaTextSecondary,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+        )
+    }
+}
+
+@Composable
 private fun Badge(text: String, color: Color) {
     Surface(
         color = color.copy(alpha = 0.14f),
@@ -329,7 +471,7 @@ private fun Badge(text: String, color: Color) {
             text = text,
             style = MaterialTheme.typography.labelSmall,
             color = color,
-            fontSize = 8.sp,
+            fontSize = 9.sp,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
         )
     }
@@ -354,7 +496,7 @@ private fun DetailMetricTile(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
                 color = ArenaTextMuted,
-                fontSize = 8.sp
+                fontSize = 9.sp
             )
             Spacer(modifier = Modifier.height(3.dp))
             Text(
@@ -442,7 +584,7 @@ private fun CostTile(
                     text = label,
                     style = MaterialTheme.typography.labelSmall,
                     color = ArenaTextMuted,
-                    fontSize = 8.sp
+                    fontSize = 9.sp
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
