@@ -607,7 +607,7 @@ class LeaderboardLogicTest {
         assertTrue(lines[0].startsWith("rank,model,provider,arena_score"))
         assertTrue(lines[1].startsWith("1,\"Model, One\",Acme,88.5"))
         assertTrue(lines[1].contains("\"acme/model,one\""))
-        assertTrue(lines[1].endsWith("yes,,acme/model,one\""))
+        assertTrue(lines[1].endsWith("yes,,\"acme/model,one\""))
     }
 
     @Test

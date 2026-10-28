@@ -29,7 +29,7 @@ import org.robolectric.annotation.GraphicsMode
  * assertions are made on the settled first frame.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w411dp-h891dp-xhdpi")
+@Config(sdk = [34], qualifiers = "w411dp-h1600dp-xhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ScreenRenderTest {
 

@@ -36,7 +36,8 @@ class OpenRouterApiClient(
             if (!response.isSuccessful) {
                 throw IOException("OpenRouter returned HTTP ${response.code}")
             }
-            val body = response.body?.string() ?: throw IOException("Empty response body")
+            val body = response.body?.string()?.takeIf { it.isNotBlank() }
+                ?: throw IOException("Empty response body")
             decodeModels(body, json)
         }
     }
